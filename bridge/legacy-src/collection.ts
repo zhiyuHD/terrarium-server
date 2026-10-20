@@ -1,5 +1,6 @@
 import { capacity, inHabitat, recordAction, type Progression } from './progression.ts';
 import { TERRARIUM_PLANT_REQUIREMENTS } from './habitat.ts';
+import { isNestEntrance, surfaceAntOccupied } from './colony.ts';
 import { newState, validState, type TerrariumState, type PlantState, type SeedState, type BugState } from './state.ts';
 import { newAquarium, validAquarium, type AquariumState, type FishState, type AquaticPlantState } from './aquarium.ts';
 
@@ -33,9 +34,10 @@ export function restoreCollected(state: TerrariumState | AquariumState, id: stri
       if (state.plants.length >= capacity(state).organisms || state.plants.some(p => p.x === x && p.y === y)) throw new Error('Aquatic capacity or plot occupied: select a cell without aquatic plants; the specimen remains in collection'); state.plants.push(specimen as AquaticPlantState);
     } else throw new Error('Collection habitat mismatch');
   } else if (entry.kind === 'bug') {
+    if ((specimen as BugState).species === 'ant' && surfaceAntOccupied(state, x, y)) throw new Error('That surface cell already has an ant; the specimen remains in collection');
     if (state.bugs.length + (state.eggs?.length ?? 0) >= capacity(state).organisms) throw new Error('Bug capacity reached'); state.bugs.push(specimen as BugState);
   } else if (entry.kind === 'plant' || entry.kind === 'seed') {
-    if (state.plants.length + state.seeds.length >= capacity(state).organisms || [...state.plants, ...state.seeds].some(p => p.x === x && p.y === y)) throw new Error('Plant capacity or plot occupied: select a cell without a plant or seed; the specimen remains in collection');
+    if (state.plants.length + state.seeds.length >= capacity(state).organisms || isNestEntrance(state, x, y) || [...state.plants, ...state.seeds].some(p => p.x === x && p.y === y)) throw new Error('Plant capacity or plot occupied: select a cell without a plant or seed; the specimen remains in collection');
     if (entry.kind === 'plant') { const plant = specimen as PlantState; plant.moisture = state.soil[y * capacity(state).size + x].moisture; plant.dry = plant.moisture < TERRARIUM_PLANT_REQUIREMENTS[plant.species].minMoisture; state.plants.push(plant); }
     else state.seeds.push(specimen as SeedState);
   } else throw new Error('Collection habitat mismatch');

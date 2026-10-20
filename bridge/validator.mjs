@@ -121,6 +121,26 @@ function validMeal(value, atMs) {
   return Number.isFinite(meal.atMs) && meal.atMs <= atMs && typeof meal.kind === "string" && meal.kind.length <= 32 && (meal.id === void 0 || typeof meal.id === "string" && meal.id.length <= 32);
 }
 
+// ../terrarium-server/bridge/legacy-src/colony.ts
+var TERRARIUM_NEST_SIZE = 4;
+var TERRARIUM_NEST_MAX_SIZE = 8;
+var TERRARIUM_NEST_DIG_ACTIONS = 12;
+var nestSize = (nest) => nest.size ?? TERRARIUM_NEST_SIZE;
+var nestEntrances = (nest) => [{ x: nest.x, y: nest.y }, ...nest.entrances ?? []];
+function validColony(state) {
+  const nests = state.nests ?? [];
+  const validResident = (resident) => {
+    if (resident.inside === void 0) return true;
+    const p = resident.inside;
+    const nest = nests.find((nest2) => nest2.id === p?.nestId);
+    return resident.species === "ant" && !!nest && resident.x === nest.x && resident.y === nest.y && Number.isInteger(p.x) && p.x >= 0 && p.x < nestSize(nest) && Number.isInteger(p.y) && p.y >= 0 && p.y < nestSize(nest);
+  };
+  if (!nests.every((n) => (n.size === void 0 || Number.isInteger(n.size) && n.size >= TERRARIUM_NEST_SIZE && n.size <= TERRARIUM_NEST_MAX_SIZE) && (n.digProgress === void 0 || Number.isInteger(n.digProgress) && n.digProgress >= 0 && n.digProgress < TERRARIUM_NEST_DIG_ACTIONS) && (n.entrances === void 0 || Array.isArray(n.entrances) && n.entrances.length <= nestSize(n) - 4 && n.entrances.every((p) => p && inHabitat(state, p.x, p.y))))) return false;
+  const entrances = nests.flatMap(nestEntrances);
+  if (new Set(entrances.map((p) => `${p.x},${p.y}`)).size !== entrances.length) return false;
+  return state.bugs.every((bug) => (bug.role === void 0 || bug.species === "ant" && ["queen", "worker"].includes(bug.role)) && validResident(bug)) && state.bugs.filter((bug) => bug.role === "queen").length <= 1 && (state.eggs ?? []).every(validResident);
+}
+
 // ../terrarium-server/bridge/legacy-src/replay.ts
 var TERRARIUM_MAX_REPLAYS = 16;
 var TERRARIUM_REPLAY_RETENTION_MS = 7 * 24 * 60 * 6e4;
@@ -211,19 +231,6 @@ function isFlying(species) {
   return TERRARIUM_FLY_SPECIES.includes(species);
 }
 
-// ../terrarium-server/bridge/legacy-src/colony.ts
-var TERRARIUM_NEST_SIZE = 4;
-function validColony(state) {
-  const nests = state.nests ?? [];
-  const validResident = (resident) => {
-    if (resident.inside === void 0) return true;
-    const p = resident.inside;
-    const nest = nests.find((nest2) => nest2.id === p?.nestId);
-    return resident.species === "ant" && !!nest && resident.x === nest.x && resident.y === nest.y && Number.isInteger(p.x) && p.x >= 0 && p.x < TERRARIUM_NEST_SIZE && Number.isInteger(p.y) && p.y >= 0 && p.y < TERRARIUM_NEST_SIZE;
-  };
-  return state.bugs.every((bug) => (bug.role === void 0 || bug.species === "ant" && ["queen", "worker"].includes(bug.role)) && validResident(bug)) && state.bugs.filter((bug) => bug.role === "queen").length <= 1 && (state.eggs ?? []).every(validResident);
-}
-
 // ../terrarium-server/bridge/legacy-src/state.ts
 var TERRARIUM_MAX_NAME_LENGTH = 64;
 function validName(value) {
@@ -286,7 +293,7 @@ function initializeHabitat(state) {
 }
 function validHabitat(state) {
   const percent2 = (value) => Number.isFinite(value) && value >= 0 && value <= 100;
-  return Array.isArray(state.soil) && state.soil.length === capacity(state).size ** 2 && state.soil.every((cell, i) => cell && cell.x === i % capacity(state).size && cell.y === Math.floor(i / capacity(state).size) && percent2(cell.moisture) && (cell.allowAntForaging === void 0 || typeof cell.allowAntForaging === "boolean")) && Array.isArray(state.history) && state.history.length <= TERRARIUM_MAX_HISTORY && state.history.every((sample, i) => sample && Number.isFinite(sample.recordedAtMs) && (sample.scoreVersion === void 0 || sample.scoreVersion === 1 || sample.scoreVersion === TERRARIUM_SCORE_VERSION) && (sample.score === void 0 || Number.isSafeInteger(sample.score) && sample.score >= 0) && sample.recordedAtMs <= state.updatedAtMs && (i === 0 || sample.recordedAtMs > state.history[i - 1].recordedAtMs) && Array.isArray(sample.soilMoisture) && [5, 6, 7, 8].includes(sample.gridSize ?? 5) && (sample.gridSize ?? 5) <= capacity(state).size && sample.soilMoisture.length === (sample.gridSize ?? 5) ** 2 && sample.soilMoisture.every(percent2) && Array.isArray(sample.plants) && sample.plants.length <= (TERRARIUM_LEVELS.find((l) => l.size === (sample.gridSize ?? 5))?.organisms ?? 12) && sample.plants.every((p) => p && typeof p.id === "string" && p.id.length <= 32 && Object.hasOwn(TERRARIUM_PLANT_REQUIREMENTS, p.species) && percent2(p.moisture) && percent2(p.health) && Number.isInteger(p.stage) && p.stage >= 0 && p.stage <= 3 && Number.isFinite(p.growthHours) && p.growthHours >= 0));
+  return Array.isArray(state.soil) && state.soil.length === capacity(state).size ** 2 && state.soil.every((cell, i) => cell && cell.x === i % capacity(state).size && cell.y === Math.floor(i / capacity(state).size) && percent2(cell.moisture) && (cell.allowAntForaging === void 0 || typeof cell.allowAntForaging === "boolean") && (cell.antBackfilled === void 0 || typeof cell.antBackfilled === "boolean")) && Array.isArray(state.history) && state.history.length <= TERRARIUM_MAX_HISTORY && state.history.every((sample, i) => sample && Number.isFinite(sample.recordedAtMs) && (sample.scoreVersion === void 0 || sample.scoreVersion === 1 || sample.scoreVersion === TERRARIUM_SCORE_VERSION) && (sample.score === void 0 || Number.isSafeInteger(sample.score) && sample.score >= 0) && sample.recordedAtMs <= state.updatedAtMs && (i === 0 || sample.recordedAtMs > state.history[i - 1].recordedAtMs) && Array.isArray(sample.soilMoisture) && [5, 6, 7, 8].includes(sample.gridSize ?? 5) && (sample.gridSize ?? 5) <= capacity(state).size && sample.soilMoisture.length === (sample.gridSize ?? 5) ** 2 && sample.soilMoisture.every(percent2) && Array.isArray(sample.plants) && sample.plants.length <= (TERRARIUM_LEVELS.find((l) => l.size === (sample.gridSize ?? 5))?.organisms ?? 12) && sample.plants.every((p) => p && typeof p.id === "string" && p.id.length <= 32 && Object.hasOwn(TERRARIUM_PLANT_REQUIREMENTS, p.species) && percent2(p.moisture) && percent2(p.health) && Number.isInteger(p.stage) && p.stage >= 0 && p.stage <= 3 && Number.isFinite(p.growthHours) && p.growthHours >= 0));
 }
 function validReplays(state) {
   return state.replays === void 0 || Array.isArray(state.replays) && state.replays.length <= TERRARIUM_MAX_REPLAYS && state.replays.every((replay, i) => {

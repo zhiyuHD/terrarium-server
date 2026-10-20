@@ -396,8 +396,8 @@ var STYLE = `
 .tn-dialog{overscroll-behavior:contain}.tn-head{position:sticky;top:0;z-index:2;background:#f7f1e4}
 .tn-close,.tn-open{font:inherit;cursor:pointer;border:1px solid #b6aa88;border-radius:24px;background:#fffaf0;color:#4c573a;padding:8px 15px;transition:background .2s,transform .2s}.tn-close:hover,.tn-open:hover{background:#e8e4d1;transform:translateY(-1px)}.tn-toolbar{position:relative;display:flex;gap:6px;flex-wrap:wrap;z-index:1}.scene-wrap>.tn-toolbar{position:absolute;left:12px;bottom:10px}.tn-toolbar[hidden]{display:none}.tn-open{font-size:11px;padding:5px 11px;background:#fff9e8e8;backdrop-filter:blur(8px)}
 .tn-summary{display:flex;flex-wrap:wrap;gap:8px;padding:0 24px 16px}.tn-summary span{background:#e9e2cd;border-radius:8px;padding:6px 10px;font-size:12px;font-variant-numeric:tabular-nums}
-.tn-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;padding:18px;margin:0 24px;background:#796448;border:1px solid #6b593f;border-radius:18px;box-shadow:inset 0 3px 15px #3d2d2030}
-.tn-cell{position:relative;box-sizing:border-box;width:100%;min-width:0;min-height:94px;aspect-ratio:1;overflow:hidden;border:1px solid #c6ac78;border-radius:19% 28% 23% 26%;background:radial-gradient(ellipse at 40% 35%,#a68a5e,#967347);color:#fff2d2;cursor:pointer;box-shadow:inset 0 3px 10px #3f2b2030,0 2px 2px #30251d28;font:inherit;padding:8px;transition:background .2s,box-shadow .2s}
+.tn-grid{display:grid;grid-template-columns:repeat(var(--nest-size,4),minmax(80px,1fr));gap:9px;padding:18px;margin:0 24px;overflow-x:auto;background:#796448;border:1px solid #6b593f;border-radius:18px;box-shadow:inset 0 3px 15px #3d2d2030}
+.tn-cell{position:relative;box-sizing:border-box;width:100%;min-width:0;min-height:80px;aspect-ratio:1;overflow:hidden;border:1px solid #c6ac78;border-radius:19% 28% 23% 26%;background:radial-gradient(ellipse at 40% 35%,#a68a5e,#967347);color:#fff2d2;cursor:pointer;box-shadow:inset 0 3px 10px #3f2b2030,0 2px 2px #30251d28;font:inherit;padding:8px;transition:background .2s,box-shadow .2s}
 .tn-cell:hover,.tn-cell[aria-pressed=true]{background:radial-gradient(ellipse at 40% 35%,#b79b6a,#a7804c);box-shadow:inset 0 0 0 2px #f3dba5,0 2px 8px #30251d30}.tn-cell:focus-visible,.tn-close:focus-visible,.tn-open:focus-visible{outline:3px solid #9cbd9a;outline-offset:3px}
 .tn-cell-label{position:absolute;left:9px;top:6px;font-size:10px;color:#f6e7c3c9}.tn-occupants{position:absolute;inset:38px 5px 20px;display:flex;justify-content:center;align-items:center;gap:6px;overflow:hidden}.tn-ant{display:inline-flex;flex:0 1 auto;min-width:0;width:40px;height:30px;--ant-abdomen:#b77a50;--ant-head:#d7a171;--ant-chest:#c48a5c}.tn-ant svg{display:block;width:100%;height:100%;overflow:visible}.tn-ant.queen{width:46px;height:34px;--ant-abdomen:#c6984f;--ant-head:#e3b97e;--ant-chest:#d2a164}.tn-eggs{display:flex;flex:0 0 16px;flex-wrap:wrap;align-content:center;justify-content:center;gap:2px}.tn-egg{display:inline-block;width:6px;height:8px;border-radius:60% 50% 55% 45%;background:#fff1ce;box-shadow:inset -2px -1px 1px #d4bd91;transform:rotate(25deg)}.tn-food{flex:0 0 auto;white-space:nowrap;font-size:13px;color:#ffe2a1;font-variant-numeric:tabular-nums}.tn-cell-count{position:absolute;bottom:5px;right:8px;font-size:10px;color:#fff0ce}.tn-detail{padding:16px 24px 22px;min-height:65px}.tn-detail h3{font-size:13px;margin:0 0 5px}.tn-detail p{font-size:12px;margin:3px 0;color:#7b6a50;overflow-wrap:anywhere}.tn-note{padding:0 24px 18px;font-size:12px;color:#85755b}
 @media(max-width:480px){.tn-head{padding:16px 16px 12px}.tn-head h2{font-size:19px}.tn-grid{padding:10px;margin:0 12px;gap:6px}.tn-cell{padding:5px}.tn-cell-label{font-size:8px;left:5px}.tn-occupants{gap:3px;inset:38px 3px 18px}.tn-summary{padding:0 16px 12px;gap:5px}.tn-summary span{font-size:11px;padding:4px 7px}.tn-detail{padding:14px 16px}.tn-cell-count{font-size:8px;right:5px}.tn-ant{width:34px;height:26px}.tn-ant.queen{width:40px;height:30px}.tn-ant~.tn-ant{display:none}.tn-eggs{flex-basis:12px}.tn-egg{width:5px;height:7px}.tn-food{font-size:10px}}
@@ -459,7 +459,8 @@ function createNestViewer(canvas, language = "zh") {
   const head = el("div", "tn-head"), title = el("h2", "", text.title), close = el("button", "tn-close", text.close);
   close.type = "button";
   const heading = el("div", "");
-  heading.append(el("div", "tn-kicker", "COLONY / 4 \xD7 4"), title);
+  const kicker = el("div", "tn-kicker", "COLONY / 4 \xD7 4");
+  heading.append(kicker, title);
   head.append(heading, close);
   const summary = el("div", "tn-summary");
   summary.setAttribute("aria-live", "polite");
@@ -475,16 +476,16 @@ function createNestViewer(canvas, language = "zh") {
   let state = null, selectedId = null, cellIndex = 10, recordedAtMs;
   const triggers = /* @__PURE__ */ new Map();
   let returnView = null;
-  const cells = Array.from({ length: NEST_SIZE ** 2 }, (_, index) => {
+  const makeCell = (index) => {
     const cell = el("button", "tn-cell");
     cell.type = "button";
     cell.addEventListener("click", () => {
       cellIndex = index;
       render();
     });
-    grid.append(cell);
     return cell;
-  });
+  };
+  let cells = [];
   const roomName = (x, y) => x === 0 && y === 0 ? text.entrance : x === 3 && y === 0 ? text.storage : x === 2 && y === 2 ? text.nursery : text.room;
   const remainingTime = (hatchesAtMs) => {
     const minutes = Math.ceil((hatchesAtMs - (recordedAtMs ?? Date.now())) / 6e4);
@@ -501,14 +502,24 @@ function createNestViewer(canvas, language = "zh") {
         dialog.close();
       return;
     }
+    const size = nest.size ?? NEST_SIZE;
+    dialog.style.width = size > 5 ? "min(920px,calc(100vw - 24px))" : "min(720px,calc(100vw - 24px))";
+    if (cells.length !== size * size) {
+      cells = Array.from({ length: size * size }, (_, i) => makeCell(i));
+      grid.replaceChildren(...cells);
+    }
+    cellIndex = Math.min(cellIndex, size * size - 1);
+    grid.style.setProperty("--nest-size", String(size));
+    grid.setAttribute("aria-label", zh ? `${size}\xD7${size} \u8681\u5DE2\u683C\u5B50` : `${size} by ${size} nest cells`);
+    kicker.textContent = `COLONY / ${size} \xD7 ${size}`;
     const ants = state.bugs.filter((b) => b.species === "ant" && b.inside?.nestId === nest.id);
     const eggs = (state.eggs ?? []).filter((e) => e.species === "ant" && e.inside?.nestId === nest.id);
     const contents = { ants, eggs, queens: ants.filter((a) => a.role === "queen").length, food: nest.food };
     title.textContent = `${text.title} \xB7 ${nest.id}`;
-    summary.replaceChildren(...[`${text.ant} ${contents.ants.length}`, `${text.queen} ${contents.queens}`, `${text.egg} ${contents.eggs.length}`, `${text.food} ${contents.food}/${nest.foodCapacity ?? "\u2014"}`].map((label) => el("span", "", label)));
+    summary.replaceChildren(...[`${size}\xD7${size} \xB7 ${size * size} ${zh ? "\u683C" : "cells"}`, `${zh ? "\u5165\u53E3" : "Entrances"} ${1 + (nest.entrances?.length ?? 0)}`, `${text.ant} ${contents.ants.length}`, `${text.queen} ${contents.queens}`, `${text.egg} ${contents.eggs.length}`, `${text.food} ${contents.food}/${nest.foodCapacity ?? "\u2014"}`].map((label) => el("span", "", label)));
     note.hidden = state.bugs.some((bug) => bug.species === "ant" && bug.role !== void 0);
     for (const [index, cell] of cells.entries()) {
-      const x = index % NEST_SIZE, y = Math.floor(index / NEST_SIZE);
+      const x = index % size, y = Math.floor(index / size);
       const ants2 = contents.ants.filter((ant) => ant.inside.x === x && ant.inside.y === y), eggs2 = contents.eggs.filter((egg) => egg.inside.x === x && egg.inside.y === y);
       const hasQueen = ants2.some((ant) => ant.role === "queen");
       cell.classList.toggle("has-queen", hasQueen);
@@ -582,11 +593,11 @@ function createNestViewer(canvas, language = "zh") {
   const hit = (event) => {
     const bounds = canvas.getBoundingClientRect();
     const rx = Math.max(24, 30 * bounds.width / canvas.width), ry = Math.max(24, 20 * bounds.height / canvas.height);
-    const targets = (state?.nests ?? []).map((nest2) => ({
+    const targets = (state?.nests ?? []).flatMap((nest2) => [nest2, ...nest2.entrances ?? []].map((entrance) => ({
       nest: nest2,
-      dx: event.clientX - bounds.left - plotPosition(nest2.x, nest2.y, sceneSize(state)).x * bounds.width / canvas.width,
-      dy: event.clientY - bounds.top - plotPosition(nest2.x, nest2.y, sceneSize(state)).y * bounds.height / canvas.height
-    })).filter(({ dx, dy }) => Math.abs(dx) <= rx && Math.abs(dy) <= ry);
+      dx: event.clientX - bounds.left - plotPosition(entrance.x, entrance.y, sceneSize(state)).x * bounds.width / canvas.width,
+      dy: event.clientY - bounds.top - plotPosition(entrance.x, entrance.y, sceneSize(state)).y * bounds.height / canvas.height
+    }))).filter(({ dx, dy }) => Math.abs(dx) <= rx && Math.abs(dy) <= ry);
     targets.sort((a, b) => a.dx ** 2 + a.dy ** 2 - b.dx ** 2 - b.dy ** 2);
     const nest = targets[0]?.nest;
     if (nest)
@@ -765,10 +776,11 @@ function drawScene(canvas, state, positions = /* @__PURE__ */ new Map(), hits = 
       g.rect(left, top, cellWidth, cellHeight);
       g.stroke();
     }
-  for (const nest of state.nests ?? []) {
-    const { x, y } = plot(nest.x, nest.y);
-    drawAntNest(g, x, y, night);
-  }
+  for (const colony of state.nests ?? [])
+    for (const nest of [colony, ...colony.entrances ?? []]) {
+      const { x, y } = plot(nest.x, nest.y);
+      drawAntNest(g, x, y, night);
+    }
   for (const web of state.webs ?? []) {
     const { x, y } = plot(web.x, web.y);
     g.save();

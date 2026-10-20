@@ -1,7 +1,7 @@
 import { capacity, nearFacility, type DevelopmentState } from './progression.ts';
 export type PlantSpecies = 'fern' | 'clover' | 'moss' | 'basil' | 'bean' | 'sunflower' | 'mint';
 export interface PlantRequirements { minMoisture: number; maxMoisture: number; minLight: number; maxLight: number }
-export interface SoilCell { x: number; y: number; moisture: number; allowAntForaging?: boolean }
+export interface SoilCell { x: number; y: number; moisture: number; allowAntForaging?: boolean; antBackfilled?: boolean }
 export const TERRARIUM_LEAF_DAMAGE = { perHarvestHealth: 5, recoveryPerGrowthHour: 2 } as const;
 export const TERRARIUM_PLANT_LOW_HEALTH = 20;
 export const TERRARIUM_PLANT_RECOVERED_HEALTH = 35;

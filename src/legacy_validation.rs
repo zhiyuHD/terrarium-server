@@ -143,6 +143,28 @@ mod tests {
         assert_eq!(validator.validate(&land()).await.unwrap(), land());
     }
     #[tokio::test]
+    async fn expanded_colonies_preserve_layout_and_old_overlaps_without_simulation() {
+        let validator = LegacyValidator::default();
+        let mut state = land();
+        state["nests"] = serde_json::json!([{
+            "id": "nest-expanded", "x": 1, "y": 4, "depth": 5, "food": 50,
+            "size": 5, "digProgress": 4, "entrances": [{"x": 2, "y": 4}]
+        }]);
+        state["soil"][0]["antBackfilled"] = serde_json::json!(true);
+        state["bugs"] = serde_json::json!([
+            {"id": "ant-one", "species": "ant", "role": "queen", "x": 1, "y": 4,
+             "ageHours": 8, "energy": 80, "inside": {"nestId": "nest-expanded", "x": 4, "y": 4}},
+            {"id": "ant-two", "species": "ant", "role": "worker", "x": 1, "y": 4,
+             "ageHours": 1, "energy": 80, "inside": {"nestId": "nest-expanded", "x": 4, "y": 4}}
+        ]);
+        assert_eq!(validator.validate(&state).await.unwrap(), state);
+        state["nests"][0]["size"] = serde_json::json!(4);
+        assert!(validator.validate(&state).await.is_err());
+        state["nests"][0]["size"] = serde_json::json!(5);
+        state["nests"][0]["entrances"][0]["x"] = serde_json::json!(1);
+        assert!(validator.validate(&state).await.is_err());
+    }
+    #[tokio::test]
     async fn cancelling_validation_cannot_deliver_its_reply_to_the_next_request() {
         let validator = LegacyValidator {
             worker: Arc::new(Mutex::new(Some(scripted(

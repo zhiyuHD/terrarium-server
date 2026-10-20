@@ -16,13 +16,15 @@ try{
  if(kind==='land'){
  state.plants[0]={...state.plants[0],species:'sunflower',growthHours:30,stage:3,seedRounds:1,leafDamage:40};state.plants[1].species='mint';
  state.bugs=[{id:'bug-neighbor-protocol',species:'ladybug',x:1,y:1,ageHours:1,energy:80,hunger:10}];
+ state.nests=[{id:'nest-expanded-protocol',x:1,y:4,depth:5,food:50,size:5,digProgress:4,entrances:[{x:2,y:4}]}];state.soil[0].antBackfilled=true;
  state.food=[{id:'food-neighbor-protocol',kind:'sunflower_seed',x:0,y:0,portions:3,droppedAtMs:state.updatedAtMs}];
  await client.report(state,'day');assert.equal(client.status().state,'synced');
  const accepted=await(await fetch(`${url}/api/boxes/${id}`)).json();assert.deepEqual(accepted.state,state);
  console.log('New land species and sunflower seed rounds accepted');
  }
+ if(kind==='land'){state.nests[0].size=6;state.nests[0].entrances.push({x:3,y:4});}
  state.name=kind+' mirror garden';state.updatedAtMs=Date.now();await client.report(state,'night');assert.equal(client.status().state,'synced');
- const uploaded=await(await fetch(`${url}/api/boxes/${id}`)).json();assert.equal(uploaded.state.name,state.name);assert.equal(uploaded.kind,kind);assert.equal(uploaded.reportTransport,'websocket');
+ const uploaded=await(await fetch(`${url}/api/boxes/${id}`)).json();assert.deepEqual(uploaded.state,state);assert.equal(uploaded.kind,kind);assert.equal(uploaded.reportTransport,'websocket');
  const ranking=await client.leaderboard(10);assert.equal(ranking.own?.id,id);assert.equal(ranking.total,1);const notices=await client.announcements(0);assert.deepEqual(notices.announcements,[]);
  client.close();const reconnected=new LeaderboardClient({url,id:'',automaticIds:true,kind,credentialsFile:join(dir,kind,'report-credentials.json'),incrementalReports:true});clients.push(reconnected);await reconnected.restore();assert.equal(reconnected.id,id);await reconnected.report(state,'day');assert.equal(reconnected.id,id);assert.equal(reconnected.status().state,'synced');
  console.log(JSON.stringify({kind,registered:true,full:true,delta:true,transport:client.status().transport,ranking:true,announcements:true,reconnect:true,credentialsReused:true}));
