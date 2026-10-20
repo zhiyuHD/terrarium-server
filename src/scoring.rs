@@ -9,24 +9,27 @@ fn number(value: &Value, key: &str) -> Result<f64> {
         .with_context(|| format!("Invalid numeric field: {key}"))
 }
 fn species_score(items: &Value, value: impl Fn(&Value) -> Result<f64>) -> Result<f64> {
-    let mut species: HashMap<&str, Vec<f64>> = HashMap::new();
+    let mut indices: HashMap<&str, usize> = HashMap::new();
+    let mut species: Vec<Vec<f64>> = Vec::new();
     for item in items.as_array().context("Missing organism array")? {
-        species
-            .entry(item["species"].as_str().context("Missing species")?)
-            .or_default()
-            .push(value(item)?);
+        let name = item["species"].as_str().context("Missing species")?;
+        let index = *indices.entry(name).or_insert_with(|| {
+            species.push(Vec::new());
+            species.len() - 1
+        });
+        species[index].push(value(item)?);
     }
     let total: f64 = species
-        .values_mut()
+        .iter_mut()
         .map(|values| {
             values.sort_by(|a, b| b.total_cmp(a));
             values
                 .iter()
                 .zip([1.0, 0.5, 0.25])
                 .map(|(v, w)| v * w)
-                .sum::<f64>()
+                .fold(0.0, |sum, value| sum + value)
         })
-        .sum();
+        .fold(0.0, |sum, value| sum + value);
     ensure!(total.is_finite(), "Invalid score");
     Ok(total.round())
 }
