@@ -1,0 +1,25 @@
+[package]
+name = "terrarium-server"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Terrarium server migration: SQLite storage and Rust read APIs"
+repository = "https://github.com/zhiyuHD/terrarium-server"
+
+[dependencies]
+anyhow = "1"
+axum = "0.8"
+clap = { version = "4", features = ["derive", "env"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+
+[profile.release]
+lto = "thin"
+strip = true
