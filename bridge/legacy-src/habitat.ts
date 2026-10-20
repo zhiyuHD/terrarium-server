@@ -1,5 +1,5 @@
 import { capacity, nearFacility, type DevelopmentState } from './progression.ts';
-export type PlantSpecies = 'fern' | 'clover' | 'moss' | 'basil' | 'bean';
+export type PlantSpecies = 'fern' | 'clover' | 'moss' | 'basil' | 'bean' | 'sunflower' | 'mint';
 export interface PlantRequirements { minMoisture: number; maxMoisture: number; minLight: number; maxLight: number }
 export interface SoilCell { x: number; y: number; moisture: number; allowAntForaging?: boolean }
 export const TERRARIUM_PLANT_LOW_HEALTH = 20;
@@ -13,6 +13,8 @@ export const TERRARIUM_PLANT_REQUIREMENTS: Record<PlantSpecies, PlantRequirement
   moss: { minMoisture: 45, maxMoisture: 90, minLight: .15, maxLight: .4 },
   basil: { minMoisture: 30, maxMoisture: 75, minLight: .65, maxLight: 1 },
   bean: { minMoisture: 25, maxMoisture: 70, minLight: .7, maxLight: 1 },
+  sunflower: { minMoisture: 25, maxMoisture: 70, minLight: .75, maxLight: 1 },
+  mint: { minMoisture: 35, maxMoisture: 85, minLight: .3, maxLight: .85 },
 };
 
 export interface WateredPlant {
@@ -53,12 +55,20 @@ export function plantCareAdvice(plant: { species: PlantSpecies; moisture: number
 }
 export const TERRARIUM_MAX_HISTORY = 168;
 
+export const TERRARIUM_SUNFLOWER = { seedHours: 30, seedIntervalHours: 12, seedPortions: 3 } as const;
+export function sunflowerSeedRounds(growthHours: number): number {
+  return Math.max(0, Math.floor((growthHours - TERRARIUM_SUNFLOWER.seedHours) / TERRARIUM_SUNFLOWER.seedIntervalHours) + 1);
+}
+export function hasSeedHead(plant: { species: string; growthHours?: number }): boolean {
+  return plant.species === 'sunflower' && sunflowerSeedRounds(plant.growthHours ?? 0) > 0;
+}
 export const TERRARIUM_FLOWER_BUD_HOURS = 12;
 export const TERRARIUM_FLOWER_BLOOM_HOURS = 18;
 
 /** Flowers follow accumulated suitable daylight growth; fern and moss do not flower. */
 export function flowerStage(plant: { species: string; growthHours?: number; health: number; moisture: number; dry: boolean }): 'bud' | 'bloom' | undefined {
-  if (plant.species !== 'clover' && plant.species !== 'basil' && plant.species !== 'bean') return;
+  if (plant.species !== 'clover' && plant.species !== 'basil' && plant.species !== 'bean' && plant.species !== 'sunflower' && plant.species !== 'mint') return;
+  if (hasSeedHead(plant)) return;
   const needs = TERRARIUM_PLANT_REQUIREMENTS[plant.species];
   if (plant.health < TERRARIUM_PLANT_RECOVERED_HEALTH || plant.dry || plant.moisture < needs.minMoisture || plant.moisture > needs.maxMoisture) return;
   if ((plant.growthHours ?? 0) >= TERRARIUM_FLOWER_BLOOM_HOURS) return 'bloom';

@@ -117,6 +117,28 @@ mod tests {
         serde_json::from_str::<Value>(include_str!("../tests/fixtures/reports.json")).unwrap()["land"].clone()
     }
     #[tokio::test]
+    async fn new_land_species_preserve_harvest_rounds_and_reject_invalid_counters() {
+        let validator = LegacyValidator::default();
+        let mut state = land();
+        state["plants"][0]["species"] = serde_json::json!("sunflower");
+        state["plants"][0]["growthHours"] = serde_json::json!(30);
+        state["plants"][0]["stage"] = serde_json::json!(3);
+        state["plants"][0]["seedRounds"] = serde_json::json!(1);
+        state["plants"][1]["species"] = serde_json::json!("mint");
+        state["bugs"] = serde_json::json!([{
+            "id": "bug-new-neighbor", "species": "ladybug", "x": 1, "y": 1,
+            "ageHours": 1, "energy": 80, "hunger": 10
+        }]);
+        state["food"] = serde_json::json!([{
+            "id": "food-new-neighbor", "kind": "sunflower_seed", "x": 0, "y": 0,
+            "portions": 3, "droppedAtMs": state["updatedAtMs"]
+        }]);
+        assert_eq!(validator.validate(&state).await.unwrap(), state);
+        state["plants"][0]["seedRounds"] = serde_json::json!(2);
+        assert!(validator.validate(&state).await.is_err());
+        assert_eq!(validator.validate(&land()).await.unwrap(), land());
+    }
+    #[tokio::test]
     async fn cancelling_validation_cannot_deliver_its_reply_to_the_next_request() {
         let validator = LegacyValidator {
             worker: Arc::new(Mutex::new(Some(scripted(

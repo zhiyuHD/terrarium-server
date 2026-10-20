@@ -1,4 +1,4 @@
-// src/progression.ts
+// packages/cortico-world-terrarium/src/progression.ts
 var TERRARIUM_LEVELS = [
   { level: 1, requiredScore: 0, size: 5, organisms: 12, collection: 48 },
   { level: 2, requiredScore: 120, size: 6, organisms: 18, collection: 64 },
@@ -16,14 +16,16 @@ function nearFacility(state, kind, x, y) {
   return state.facilities?.some((f) => f.kind === kind && f.enabled && Math.abs(f.x - x) + Math.abs(f.y - y) <= 1) ?? false;
 }
 
-// src/habitat.ts
+// packages/cortico-world-terrarium/src/habitat.ts
 var TERRARIUM_PLANT_RECOVERED_HEALTH = 35;
 var TERRARIUM_PLANT_REQUIREMENTS = {
   fern: { minMoisture: 30, maxMoisture: 85, minLight: 0.15, maxLight: 0.7 },
   clover: { minMoisture: 20, maxMoisture: 80, minLight: 0.45, maxLight: 1 },
   moss: { minMoisture: 45, maxMoisture: 90, minLight: 0.15, maxLight: 0.4 },
   basil: { minMoisture: 30, maxMoisture: 75, minLight: 0.65, maxLight: 1 },
-  bean: { minMoisture: 25, maxMoisture: 70, minLight: 0.7, maxLight: 1 }
+  bean: { minMoisture: 25, maxMoisture: 70, minLight: 0.7, maxLight: 1 },
+  sunflower: { minMoisture: 25, maxMoisture: 70, minLight: 0.75, maxLight: 1 },
+  mint: { minMoisture: 35, maxMoisture: 85, minLight: 0.3, maxLight: 0.85 }
 };
 function daylight(habitat, x, y) {
   const shaded = habitat.items.some((item) => item.id === "pebble" && Math.abs(item.x - x) + Math.abs(item.y - y) <= 1);
@@ -32,28 +34,36 @@ function daylight(habitat, x, y) {
   if (nearFacility(habitat, "grow_light", x, y)) light = Math.max(0.75, light);
   return light;
 }
+var TERRARIUM_SUNFLOWER = { seedHours: 30, seedIntervalHours: 12, seedPortions: 3 };
+function sunflowerSeedRounds(growthHours) {
+  return Math.max(0, Math.floor((growthHours - TERRARIUM_SUNFLOWER.seedHours) / TERRARIUM_SUNFLOWER.seedIntervalHours) + 1);
+}
+function hasSeedHead(plant) {
+  return plant.species === "sunflower" && sunflowerSeedRounds(plant.growthHours ?? 0) > 0;
+}
 var TERRARIUM_FLOWER_BUD_HOURS = 12;
 var TERRARIUM_FLOWER_BLOOM_HOURS = 18;
 function flowerStage(plant) {
-  if (plant.species !== "clover" && plant.species !== "basil" && plant.species !== "bean") return;
+  if (plant.species !== "clover" && plant.species !== "basil" && plant.species !== "bean" && plant.species !== "sunflower" && plant.species !== "mint") return;
+  if (hasSeedHead(plant)) return;
   const needs = TERRARIUM_PLANT_REQUIREMENTS[plant.species];
   if (plant.health < TERRARIUM_PLANT_RECOVERED_HEALTH || plant.dry || plant.moisture < needs.minMoisture || plant.moisture > needs.maxMoisture) return;
   if ((plant.growthHours ?? 0) >= TERRARIUM_FLOWER_BLOOM_HOURS) return "bloom";
   if ((plant.growthHours ?? 0) >= TERRARIUM_FLOWER_BUD_HOURS) return "bud";
 }
 
-// src/flight.ts
+// packages/cortico-world-terrarium/src/flight.ts
 var TERRARIUM_FLY_SPECIES = ["fruit_fly", "mosquito", "moth"];
 function isFlying(species) {
   return TERRARIUM_FLY_SPECIES.includes(species);
 }
 
-// ../../../packages/terrarium-renderer/dist/types.js
+// scratch/terrarium-0805/renderer-source/dist/types.js
 function sceneSize(scene) {
   return scene.gridSize ?? 5;
 }
 
-// ../../../packages/terrarium-renderer/dist/geometry.js
+// scratch/terrarium-0805/renderer-source/dist/geometry.js
 var LAND_SURFACE = { x: 84, y: 204, width: 632, height: 216 };
 var WATER_SURFACE = { x: 90, y: 128, width: 620, height: 286 };
 function cellPosition(surface, x, y, size) {
@@ -66,10 +76,193 @@ function residentScale(size) {
   return 5 / size;
 }
 
-// ../../../packages/terrarium-renderer/dist/flowers.js
+// scratch/terrarium-0805/renderer-source/dist/neighbors.js
+function drawNeighborPlant(g, plant, x, base, night, flowersOnly = false) {
+  if (plant.species !== "sunflower" && plant.species !== "mint")
+    return false;
+  const height = 13 + plant.stage * 20;
+  g.save();
+  g.translate(x, base);
+  g.lineCap = "round";
+  const stem = plant.dry ? "#87926a" : night ? "#527851" : "#528451";
+  const leaf = plant.dry ? "#9ca573" : night ? "#5c906c" : "#6db786";
+  g.strokeStyle = stem;
+  g.lineWidth = 3 + plant.stage;
+  if (plant.species === "sunflower") {
+    if (!flowersOnly) {
+      g.beginPath();
+      g.moveTo(0, 0);
+      g.quadraticCurveTo(-4, -height * 0.5, 0, -height);
+      g.stroke();
+      for (let i = 0; i <= plant.stage; i++) {
+        const side = i % 2 ? -1 : 1, cy = -10 - i * 15;
+        g.fillStyle = leaf;
+        g.beginPath();
+        g.moveTo(0, cy);
+        g.bezierCurveTo(side * 25, cy - 22, side * 35, cy - 5, side * 18, cy + 1);
+        g.quadraticCurveTo(side * 7, cy + 5, 0, cy);
+        g.fill();
+        g.strokeStyle = stem;
+        g.lineWidth = 1;
+        g.beginPath();
+        g.moveTo(0, cy);
+        g.lineTo(side * 23, cy - 7);
+        g.stroke();
+      }
+    }
+    if (plant.seedHead) {
+      g.save();
+      g.translate(3, -height + 2);
+      g.rotate(0.18);
+      g.fillStyle = "#ad8744";
+      g.beginPath();
+      g.arc(0, 0, 19, 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = night ? "#544737" : "#6e5036";
+      g.beginPath();
+      g.arc(0, 0, 15, 0, Math.PI * 2);
+      g.fill();
+      for (let i = 0; i < 21; i++) {
+        const a = i * 2.39996, r = Math.sqrt(i / 21) * 12;
+        g.save();
+        g.translate(Math.cos(a) * r, Math.sin(a) * r);
+        g.rotate(a);
+        g.fillStyle = i % 3 ? "#d5bd80" : "#f0dca8";
+        g.beginPath();
+        g.ellipse(0, 0, 1.5, 2.3, 0, 0, Math.PI * 2);
+        g.fill();
+        g.restore();
+      }
+      g.restore();
+    } else if (plant.flower) {
+      g.save();
+      g.translate(0, -height);
+      if (plant.flower === "bud") {
+        g.fillStyle = "#82a44f";
+        g.beginPath();
+        g.ellipse(0, 0, 9, 12, -0.15, 0, Math.PI * 2);
+        g.fill();
+        g.strokeStyle = "#b5c878";
+        g.lineWidth = 1;
+        g.beginPath();
+        g.moveTo(0, 9);
+        g.lineTo(0, -10);
+        g.stroke();
+      } else {
+        for (let ring = 0; ring < 2; ring++)
+          for (let i = 0; i < 13; i++) {
+            const a = i * Math.PI * 2 / 13 + ring * 0.2;
+            g.fillStyle = night ? ["#bea552", "#d2b963"][ring] : ["#e7ab3b", "#f5ca59"][ring];
+            g.beginPath();
+            g.ellipse(Math.cos(a) * 17, Math.sin(a) * 17, 12 - ring * 2, 4.7, a, 0, Math.PI * 2);
+            g.fill();
+          }
+        g.fillStyle = "#705036";
+        g.beginPath();
+        g.arc(0, 0, 12, 0, Math.PI * 2);
+        g.fill();
+        g.fillStyle = "#b58c50";
+        for (let i = 0; i < 13; i++) {
+          const a = i * 2.39996, r = Math.sqrt(i / 13) * 8;
+          g.beginPath();
+          g.arc(Math.cos(a) * r, Math.sin(a) * r, 1, 0, Math.PI * 2);
+          g.fill();
+        }
+      }
+      g.restore();
+    }
+  } else {
+    for (const side of plant.stage > 1 ? [-1, 0, 1] : [0]) {
+      const top = -height * (side ? 0.78 : 1), endX = side * 15;
+      if (!flowersOnly) {
+        g.strokeStyle = stem;
+        g.lineWidth = 2.5;
+        g.beginPath();
+        g.moveTo(0, 0);
+        g.quadraticCurveTo(endX, top * 0.4, endX, top);
+        g.stroke();
+        for (let level = 0; level <= plant.stage; level++)
+          for (const direction of [-1, 1]) {
+            const cy = -8 + top * (0.18 + level * 0.2), cx = endX * Math.min(1, cy / top * 1.3);
+            const tipX = cx + direction * (13 + plant.stage * 1.5), tipY = cy - 9;
+            g.fillStyle = leaf;
+            g.beginPath();
+            g.moveTo(cx, cy);
+            g.quadraticCurveTo(cx + direction * 17, cy + 4, tipX, tipY);
+            g.quadraticCurveTo(cx + direction * 5, cy - 14, cx, cy);
+            g.fill();
+            g.strokeStyle = night ? "#9ab596" : "#b0d5a7";
+            g.lineWidth = 0.7;
+            g.beginPath();
+            g.moveTo(cx, cy);
+            g.lineTo(tipX, tipY);
+            g.stroke();
+          }
+      }
+      if (plant.flower)
+        for (let i = 0; i < 4; i++)
+          for (const direction of [-1, 1]) {
+            g.fillStyle = plant.flower === "bud" ? "#a79cc1" : night ? "#b8abc9" : "#d4bde5";
+            g.beginPath();
+            g.ellipse(endX + direction * 4, top - i * 5, 3, plant.flower === "bud" ? 3 : 2, direction * 0.4, 0, Math.PI * 2);
+            g.fill();
+          }
+    }
+  }
+  g.restore();
+  return true;
+}
+function drawLadybug(g, x, y, night) {
+  g.save();
+  g.translate(x, y);
+  g.strokeStyle = "#393c37";
+  g.lineWidth = 1.5;
+  g.lineCap = "round";
+  for (const side of [-1, 1])
+    for (const dy of [-5, 0, 5]) {
+      g.beginPath();
+      g.moveTo(side * 7, dy);
+      g.lineTo(side * 12, dy + 3);
+      g.stroke();
+    }
+  g.fillStyle = "#343d36";
+  g.beginPath();
+  g.ellipse(0, -7, 6, 5, 0, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = night ? "#b75642" : "#dc6551";
+  g.beginPath();
+  g.ellipse(0, 1, 10, 10, 0, 0, Math.PI * 2);
+  g.fill();
+  g.strokeStyle = "#813f35";
+  g.lineWidth = 1.3;
+  g.beginPath();
+  g.moveTo(0, -8);
+  g.lineTo(0, 10);
+  g.stroke();
+  g.fillStyle = "#343d36";
+  for (const [dx, dy, r] of [[-4, -2, 2], [4, -2, 2], [-5, 4, 2.2], [5, 4, 2.2], [0, 7, 1.6]]) {
+    g.beginPath();
+    g.arc(dx, dy, r, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.fillStyle = "#fff0d3";
+  g.beginPath();
+  g.ellipse(-4, -4, 2, 3, 0.6, 0, Math.PI * 2);
+  g.fill();
+  for (const dx of [-2.5, 2.5]) {
+    g.beginPath();
+    g.arc(dx, -9, 1.2, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.restore();
+}
+
+// scratch/terrarium-0805/renderer-source/dist/flowers.js
 function drawPlantFlowers(g, plant, x, y, night) {
   const stage = plant.flower;
-  if (!stage)
+  if (!stage && !plant.seedHead)
+    return;
+  if (drawNeighborPlant(g, { ...plant, stage: 3, dry: false }, x, y + 73, night, true))
     return;
   g.save();
   g.translate(x, y);
@@ -152,7 +345,7 @@ function drawPlantFlowers(g, plant, x, y, night) {
   g.restore();
 }
 
-// ../../../packages/terrarium-renderer/dist/nest-viewer.js
+// scratch/terrarium-0805/renderer-source/dist/nest-viewer.js
 var NEST_SIZE = 4;
 var STYLE = `
 .tn-dialog{box-sizing:border-box;width:min(720px,calc(100vw - 24px));max-height:calc(100dvh - 32px);padding:0;border:1px solid #c0ac85;border-radius:24px;background:#f7f1e4;color:#473c2e;box-shadow:0 30px 120px #17170e55;font:14px/1.5 system-ui,sans-serif;overflow:auto}
@@ -408,7 +601,7 @@ function createNestViewer(canvas, language = "zh") {
   };
 }
 
-// ../../../packages/terrarium-renderer/dist/nest-scene.js
+// scratch/terrarium-0805/renderer-source/dist/nest-scene.js
 function drawAntNest(g, x, y, night) {
   g.save();
   g.fillStyle = "rgba(35,25,18,.2)";
@@ -444,7 +637,7 @@ function drawAntNest(g, x, y, night) {
   g.restore();
 }
 
-// ../../../packages/terrarium-renderer/dist/scene.js
+// scratch/terrarium-0805/renderer-source/dist/scene.js
 function bugPositions(bugs, positions = /* @__PURE__ */ new Map(), size = 5) {
   const groups = /* @__PURE__ */ new Map();
   for (const bug of bugs) {
@@ -564,9 +757,24 @@ function drawScene(canvas, state, positions = /* @__PURE__ */ new Map(), hits = 
     const { x, y } = plot(food.x, food.y);
     g.fillStyle = "#e4b66c";
     for (let i = 0; i < Math.min(6, food.portions); i++) {
-      g.beginPath();
-      g.arc(x - 8 + i % 3 * 6, y + Math.floor(i / 3) * 5, 2.5, 0, Math.PI * 2);
-      g.fill();
+      const fx = x - 8 + i % 3 * 7, fy = y + Math.floor(i / 3) * 6;
+      if (food.kind === "sunflower_seed") {
+        g.fillStyle = "#645345";
+        g.beginPath();
+        g.ellipse(fx, fy, 2.5, 4, -0.4, 0, Math.PI * 2);
+        g.fill();
+        g.strokeStyle = "#dfd1ad";
+        g.lineWidth = 1;
+        g.beginPath();
+        g.moveTo(fx - 1, fy - 2);
+        g.lineTo(fx + 1, fy + 2);
+        g.stroke();
+      } else {
+        g.fillStyle = "#e4b66c";
+        g.beginPath();
+        g.arc(fx, fy, 2.5, 0, Math.PI * 2);
+        g.fill();
+      }
     }
   }
   for (const [index, egg] of (state.eggs ?? []).filter((egg2) => !egg2.inside).entries()) {
@@ -582,6 +790,10 @@ function drawScene(canvas, state, positions = /* @__PURE__ */ new Map(), hits = 
     g.translate(x, base);
     g.scale(scale, scale);
     g.translate(-x, -base);
+    if (drawNeighborPlant(g, plant, x, base, night)) {
+      g.restore();
+      continue;
+    }
     const height = 13 + plant.stage * 20;
     const leaves = 1 + plant.stage * 2;
     g.strokeStyle = plant.dry ? "#87926a" : "#417e4c";
@@ -698,7 +910,9 @@ function drawScene(canvas, state, positions = /* @__PURE__ */ new Map(), hits = 
   const locations = bugPositions(surfaceBugs, positions, sceneSize(state));
   for (const bug of surfaceBugs) {
     const location = locations.get(bug.id);
-    const x = location.x, y = location.y - (bug.flying ? 30 * scale : 0);
+    const host = bug.species === "aphid" || bug.species === "ladybug" ? state.plants.find((p) => p.x === bug.x && p.y === bug.y) : void 0;
+    const onLeaf = host ? (13 + host.stage * 20) * 0.6 * scale : 0;
+    const x = location.x, y = location.y - (bug.flying ? 30 * scale : onLeaf);
     g.save();
     g.translate(x, y);
     g.scale(scale, scale);
@@ -783,6 +997,8 @@ function drawScene(canvas, state, positions = /* @__PURE__ */ new Map(), hits = 
         g.arc(x + 13, y, 3, 0, Math.PI * 2);
         g.fill();
       }
+    } else if (bug.species === "ladybug") {
+      drawLadybug(g, x, y, night);
     } else if (bug.species === "beetle") {
       g.fillStyle = "#684337";
       g.beginPath();
@@ -880,7 +1096,7 @@ function createLandRenderer(canvas) {
       if (disposed)
         return;
       const now = performance.now();
-      const removed = state ? state.bugs.filter((bug) => !next.bugs.some((current) => current.id === bug.id) && next.bugs.some((hunter) => hunter.x === bug.x && hunter.y === bug.y && (hunter.species === "spider" ? bug.species !== "spider" : hunter.species === "beetle" && bug.species === "aphid"))).map((bug) => ({ x: bug.x, y: bug.y })) : [];
+      const removed = state ? state.bugs.filter((bug) => !next.bugs.some((current) => current.id === bug.id) && next.bugs.some((hunter) => hunter.x === bug.x && hunter.y === bug.y && (hunter.species === "spider" ? bug.species !== "spider" : ["beetle", "ladybug"].includes(hunter.species) && bug.species === "aphid"))).map((bug) => ({ x: bug.x, y: bug.y })) : [];
       if (removed.length) {
         hits = removed;
         hitAt = now;
@@ -919,7 +1135,7 @@ function createScene(canvas, language = "zh") {
   };
 }
 
-// ../../../packages/terrarium-renderer/dist/water-scene.js
+// scratch/terrarium-0805/renderer-source/dist/water-scene.js
 function createWaterScene(canvas) {
   let state;
   let old = /* @__PURE__ */ new Map();
@@ -1100,7 +1316,7 @@ function createWaterScene(canvas) {
   };
 }
 
-// webui/playback.ts
+// packages/cortico-world-terrarium/webui/playback.ts
 function createPlaybackControls(container, createRenderer, language = "zh") {
   const copy = language === "zh" ? { title: "\u6355\u98DF\u56DE\u653E", empty: "\u6682\u65E0\u6355\u98DF\u8BB0\u5F55", play: "\u64AD\u653E", pause: "\u6682\u505C", frames: ["\u79FB\u52A8\u524D", "\u63A5\u89E6\u730E\u7269", "\u6355\u98DF\u540E"], select: "\u9009\u62E9\u6355\u98DF\u8BB0\u5F55", frame: "\u56DE\u653E\u5E27" } : { title: "Hunt replays", empty: "No recorded hunts", play: "Play", pause: "Pause", frames: ["Before movement", "Contact", "After capture"], select: "Choose a hunt", frame: "Replay frame" };
   const details = document.createElement("details");
@@ -1205,7 +1421,7 @@ function createPlaybackControls(container, createRenderer, language = "zh") {
   };
 }
 
-// webui/water-scene.ts
+// packages/cortico-world-terrarium/webui/water-scene.ts
 function createWaterScene2(canvas) {
   const renderer = createWaterScene(canvas);
   return { setState(state) {
@@ -1218,7 +1434,7 @@ function createWaterReplayControls(container, language = "zh") {
   return createPlaybackControls(container, createWaterScene2, language);
 }
 
-// webui/public-controls.ts
+// packages/cortico-world-terrarium/webui/public-controls.ts
 var nextId = 0;
 function node(tag, className, text) {
   const element = document.createElement(tag);
@@ -1513,9 +1729,9 @@ function createPublicReplayControls(container, createRenderer, language = "zh") 
   };
 }
 
-// webui/scene.ts
+// packages/cortico-world-terrarium/webui/scene.ts
 function landScene(state) {
-  return { phase: state.phase, gridSize: capacity(state).size, facilities: state.facilities, eggs: state.eggs, nests: state.nests?.map((n) => ({ ...n, foodCapacity: n.depth * 20 })), food: state.food, webs: state.webs, seeds: state.seeds, items: state.items, soil: state.soil?.map((cell) => ({ ...cell, daylight: daylight(state, cell.x, cell.y) })), plants: state.plants.map((p) => ({ ...p, flower: flowerStage(p) })), bugs: state.bugs.map((b) => ({ ...b, flying: isFlying(b.species) })) };
+  return { phase: state.phase, gridSize: capacity(state).size, facilities: state.facilities, eggs: state.eggs, nests: state.nests?.map((n) => ({ ...n, foodCapacity: n.depth * 20 })), food: state.food, webs: state.webs, seeds: state.seeds, items: state.items, soil: state.soil?.map((cell) => ({ ...cell, daylight: daylight(state, cell.x, cell.y) })), plants: state.plants.map((p) => ({ ...p, flower: flowerStage(p), seedHead: hasSeedHead(p) })), bugs: state.bugs.map((b) => ({ ...b, flying: isFlying(b.species) })) };
 }
 function drawScene2(canvas, state, positions, hits) {
   drawScene(canvas, landScene(state), positions, hits);

@@ -4,7 +4,7 @@ import { validCareAlerts } from './care-alerts.ts';
 import { recordDeath, validDeaths, validMeal, type DeathHistory } from './deaths.ts';
 import { validCollection, type CollectionItem } from './collection.ts';
 import { score, TERRARIUM_SCORE_VERSION } from './scoring.ts';
-import { plantCareAdvice } from './habitat.ts';
+import { plantCareAdvice, sunflowerSeedRounds, TERRARIUM_SUNFLOWER } from './habitat.ts';
 import { validateWatering, waterAdded, type WateringOptions } from './habitat.ts';
 import { isFlying, flightDraw, TERRARIUM_FLY_ACTION_INTERVAL_MS, TERRARIUM_FLY_MOVE_PROBABILITY, type FlyingSpecies } from './flight.ts';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
@@ -17,14 +17,14 @@ import { captureFrame, TERRARIUM_MAX_REPLAYS, TERRARIUM_REPLAY_RETENTION_MS, typ
 export type PlantId = string;
 export type ItemId = 'coin' | 'pebble';
 export type SeedSpecies = PlantSpecies;
-export type BugSpecies = 'aphid' | 'beetle' | 'spider' | 'ant' | FlyingSpecies;
-export interface PlantState { id: PlantId; species: PlantSpecies; x: number; y: number; moisture: number; growthHours: number; stage: number; dry: boolean; health: number; healthWarning?: boolean }
+export type BugSpecies = 'aphid' | 'beetle' | 'ladybug' | 'spider' | 'ant' | FlyingSpecies;
+export interface PlantState { id: PlantId; species: PlantSpecies; x: number; y: number; moisture: number; growthHours: number; stage: number; dry: boolean; health: number; healthWarning?: boolean; seedRounds?: number }
 export interface SeedState { id: string; species: SeedSpecies; x: number; y: number; ageHours: number }
 export interface BugState { id: string; species: BugSpecies; x: number; y: number; ageHours: number; energy: number; hunger?: number; lastMeal?: { atMs: number; kind: 'foraging' }; carrying?: number; role?: 'queen' | 'worker'; inside?: NestPosition }
-export interface EggState { id: string; species: 'beetle' | 'spider' | 'ant' | FlyingSpecies; x: number; y: number; laidAtMs: number; hatchesAtMs: number; inside?: NestPosition }
+export interface EggState { id: string; species: 'beetle' | 'ladybug' | 'spider' | 'ant' | FlyingSpecies; x: number; y: number; laidAtMs: number; hatchesAtMs: number; inside?: NestPosition }
 export interface NestState { id: string; x: number; y: number; depth: number; food: number }
 export interface SpiderWeb { id: string; spiderId: string; x: number; y: number; createdAtMs: number }
-export interface LandFood { id: string; x: number; y: number; portions: number; droppedAtMs: number }
+export interface LandFood { id: string; x: number; y: number; portions: number; droppedAtMs: number; kind?: 'sunflower_seed' }
 export interface ItemState { id: ItemId; x: number; y: number }
 export interface TerrariumState extends DeathHistory, CareAlertState, DevelopmentState { collection?: CollectionItem[]; irrigation?: Array<{ x: number; y: number; targetMoisture: number; intervalMinutes: number; lastWateredAtMs: number }>; version: 3; name?: string; webs?: SpiderWeb[]; eggs?: EggState[]; nests?: NestState[]; food?: LandFood[]; replays?: HuntReplay[]; soil: SoilCell[]; history: HistorySample[]; updatedAtMs: number; nextId: number; plants: PlantState[]; seeds: SeedState[]; bugs: BugState[]; items: ItemState[] }
 export interface Change { kind: 'stage' | 'dry' | 'health' | 'phase' | 'sprout' | 'hunt' | 'death' | 'birth' | 'hungry' | 'egg' | 'nest' | 'web' | 'irrigation'; text: string }
@@ -76,7 +76,7 @@ export function sow(state: TerrariumState, species: SeedSpecies, x: number, y: n
 }
 
 export function releaseBug(state: TerrariumState, species: BugSpecies, x: number, y: number): BugState {
-  if (!['aphid', 'beetle', 'spider', 'ant'].includes(species) && !isFlying(species)) throw new Error('Unknown bug species');
+  if (!['aphid', 'beetle', 'ladybug', 'spider', 'ant'].includes(species) && !isFlying(species)) throw new Error('Unknown bug species');
   if (!inHabitat(state, x, y)) throw new Error('Position must be in the current habitat grid');
   if (state.bugs.length + (state.eggs?.length ?? 0) >= capacity(state).organisms) throw new Error('Bug capacity reached');
   const bug = { id: `bug-${state.nextId++}`, species, x, y, ageHours: 0, energy: 60, hunger: 0 };
@@ -211,9 +211,11 @@ function actBug(state: TerrariumState, bug: BugState, changes: Change[], recorde
     return;
   }
   if (predator && bug.energy >= TERRARIUM_PREDATOR_SATIATED_ENERGY && (bug.hunger ?? 0) < TERRARIUM_BUG_FORAGE_HUNGER) return;
-  const targets = bug.species === 'aphid' ? state.plants : state.bugs.filter(other =>
+  if (!predator && bug.energy >= 70 && (bug.hunger ?? 0) < TERRARIUM_BUG_FORAGE_HUNGER && state.plants.some(p => p.health > 0 && p.x === bug.x && p.y === bug.y)) return;
+  const targets = bug.species === 'aphid' ? state.plants.filter(p => p.health > 0) : state.bugs.filter(other =>
     other.id !== bug.id && !other.inside && !isFlying(other.species) && !atEntrance(other) &&
-    Math.abs(other.x - bug.x) + Math.abs(other.y - bug.y) <= TERRARIUM_PREDATOR_SENSE_RADIUS &&
+    Math.abs(other.x - bug.x) + Math.abs(other.y - bug.y) <= (bug.species === 'ladybug' ? 3 : TERRARIUM_PREDATOR_SENSE_RADIUS) &&
+    !(bug.species === 'spider' && other.species === 'aphid' && state.plants.some(p => p.species === 'mint' && p.stage >= 2 && p.health >= 60 && !p.dry && p.x === other.x && p.y === other.y) && (bug.x !== other.x || bug.y !== other.y)) &&
     (bug.species === 'spider' ? other.species !== 'spider' : other.species === 'aphid'));
   const target = [...targets].sort((a, b) =>
     Math.abs(a.x - bug.x) + Math.abs(a.y - bug.y) - Math.abs(b.x - bug.x) - Math.abs(b.y - bug.y) || a.id.localeCompare(b.id))[0];
@@ -221,7 +223,7 @@ function actBug(state: TerrariumState, bug: BugState, changes: Change[], recorde
     const before = bug.species !== 'aphid' && Math.abs(bug.x - target.x) + Math.abs(bug.y - target.y) <= 1 ? captureFrame(state, currentPhase) : undefined;
     if (!step(Math.sign(target.x - bug.x), 0)) step(0, Math.sign(target.y - bug.y));
     if (bug.x === target.x && bug.y === target.y) {
-      if (bug.species === 'aphid') { damage(target as PlantState, 3, '蚜虫取食'); bug.energy = Math.min(100, bug.energy + 5); bug.hunger = Math.max(0, (bug.hunger ?? 0) - 15); }
+      if (bug.species === 'aphid') { damage(target as PlantState, 3, '蚜虫取食'); bug.energy = Math.min(100, bug.energy + 15); bug.hunger = Math.max(0, (bug.hunger ?? 0) - 25); }
       else {
         const contact = captureFrame(state, currentPhase);
         recordDeath(state, target, recordedAtMs, `被 ${bug.id}（${bug.species}）捕食`, { phase: currentPhase, moisture: state.soil[target.y * capacity(state).size + target.x].moisture });
@@ -377,6 +379,7 @@ export function advance(state: TerrariumState, nowMs: number, timezone: string):
         changes.push({ kind: 'sprout', text: `${label(seed)} 发芽了。` });
       }
     }
+    if (state.food) state.food = state.food.filter(food => food.droppedAtMs + 48 * HOUR_MS > end);
     for (const plant of state.plants) {
       const previousFlower = flowerStage(plant);
       plant.moisture = state.soil[plant.y * capacity(state).size + plant.x].moisture;
@@ -395,9 +398,19 @@ export function advance(state: TerrariumState, nowMs: number, timezone: string):
         changes.push({ kind: 'dry', text: `${label(plant)} 的土壤变干了（水分 ${plant.moisture.toFixed(1)}，生长下限 ${needs.minMoisture}）。${plantCareAdvice(plant)}` });
       }
       plant.dry = plant.moisture < needs.minMoisture;
+      if (before === 'day' && hydrated && light >= needs.minLight && light <= needs.maxLight && plant.health >= TERRARIUM_PLANT_RECOVERED_HEALTH && plant.species === 'sunflower' && plant.growthHours >= TERRARIUM_SUNFLOWER.seedHours) {
+        const rounds = sunflowerSeedRounds(plant.growthHours);
+        if (rounds > (plant.seedRounds ?? 0)) {
+          plant.seedRounds = rounds;
+          if ((state.food?.length ?? 0) < 20) {
+            const food: LandFood = { id: `food-${state.nextId++}`, x: plant.x, y: plant.y, portions: TERRARIUM_SUNFLOWER.seedPortions, droppedAtMs: end, kind: 'sunflower_seed' };
+            (state.food ??= []).push(food);
+            changes.push({ kind: 'stage', text: `${label(plant)} 结籽，落下 ${TERRARIUM_SUNFLOWER.seedPortions} 份葵花籽 ${food.id}，蚂蚁可以采集；48 小时后腐解。` });
+          }
+        }
+      }
       if (flowerStage(plant) === 'bloom' && previousFlower !== 'bloom') changes.push({ kind: 'stage', text: `${label(plant)} 开花了。` });
     }
-    if (state.food) state.food = state.food.filter(food => food.droppedAtMs + 48 * HOUR_MS > end);
     const hourlyStep = Math.floor(start / HOUR_MS) !== Math.floor(end / HOUR_MS);
     const currentBugs = [...state.bugs];
     if (hourlyStep && state.bugs.length + (state.eggs?.length ?? 0) < capacity(state).organisms) {
@@ -598,7 +611,7 @@ function validReplays(state: Partial<TerrariumState>): boolean {
     const [before, contact, after] = replay.frames;
     const hunter = contact.bugs.find(bug => bug.id === replay.hunterId);
     const prey = contact.bugs.find(bug => bug.id === replay.preyId);
-    return !!hunter && !!prey && hunter.x === prey.x && hunter.y === prey.y && (hunter.species === 'spider' ? prey.species !== 'spider' : hunter.species === 'beetle' && prey.species === 'aphid') && before.bugs.some(bug => bug.id === hunter.id) && before.bugs.some(bug => bug.id === prey.id) && after.bugs.some(bug => bug.id === hunter.id) && !after.bugs.some(bug => bug.id === prey.id);
+    return !!hunter && !!prey && hunter.x === prey.x && hunter.y === prey.y && (hunter.species === 'spider' ? prey.species !== 'spider' : ['beetle', 'ladybug'].includes(hunter.species) && prey.species === 'aphid') && before.bugs.some(bug => bug.id === hunter.id) && before.bugs.some(bug => bug.id === prey.id) && after.bugs.some(bug => bug.id === hunter.id) && !after.bugs.some(bug => bug.id === prey.id);
   }) && new Set(state.replays.map(replay => replay.id)).size === state.replays.length);
 }
 
@@ -608,13 +621,13 @@ export function validState(value: unknown): value is TerrariumState {
   if (!validDevelopment(state, 'land') || !validCareAlerts(state.careAlerts) || !validDeaths(state.deaths, state.updatedAtMs!, capacity(state).size) || !validCollection(state.collection, 'land', capacity(state).collection) || (state.irrigation !== undefined && (!Array.isArray(state.irrigation) || state.irrigation.length > capacity(state).size ** 2 || new Set(state.irrigation.map(c => `${c?.x},${c?.y}`)).size !== state.irrigation.length || !state.irrigation.every(c => c && inHabitat(state, c.x, c.y) && Number.isFinite(c.targetMoisture) && c.targetMoisture >= 0 && c.targetMoisture <= 100 && Number.isFinite(c.intervalMinutes) && c.intervalMinutes >= 1 && c.intervalMinutes <= 1440 && Number.isFinite(c.lastWateredAtMs))))) return false;
   return state.version === 3 && (state.name === undefined || validName(state.name)) && validHabitat(state) && validReplays(state) && Number.isFinite(state.updatedAtMs) && Number.isSafeInteger(state.nextId) && state.nextId! >= 1 &&
     Array.isArray(state.plants) && state.plants.length <= capacity(state).organisms &&
-    state.plants.every(p => p && typeof p.id === 'string' && p.id.length <= 32 && ['fern', 'clover', 'moss', 'basil', 'bean'].includes(p.species) && inHabitat(state, p.x, p.y) && Number.isFinite(p.moisture) && p.moisture >= 0 && p.moisture <= 100 && Number.isFinite(p.growthHours) && p.growthHours >= 0 && Number.isInteger(p.stage) && p.stage >= 0 && p.stage <= 3 && typeof p.dry === 'boolean' && Number.isFinite(p.health) && p.health >= 0 && p.health <= 100 && (p.healthWarning === undefined || typeof p.healthWarning === 'boolean')) &&
+    state.plants.every(p => p && typeof p.id === 'string' && p.id.length <= 32 && Object.hasOwn(TERRARIUM_PLANT_REQUIREMENTS, p.species) && inHabitat(state, p.x, p.y) && Number.isFinite(p.moisture) && p.moisture >= 0 && p.moisture <= 100 && Number.isFinite(p.growthHours) && p.growthHours >= 0 && Number.isInteger(p.stage) && p.stage >= 0 && p.stage <= 3 && typeof p.dry === 'boolean' && Number.isFinite(p.health) && p.health >= 0 && p.health <= 100 && (p.healthWarning === undefined || typeof p.healthWarning === 'boolean') && (p.seedRounds === undefined || (p.species === 'sunflower' && Number.isSafeInteger(p.seedRounds) && p.seedRounds >= 0 && p.seedRounds <= sunflowerSeedRounds(p.growthHours)))) &&
     Array.isArray(state.seeds) && state.seeds.length <= capacity(state).organisms && state.plants.length + state.seeds.length <= capacity(state).organisms && state.seeds.every(s => s && typeof s.id === 'string' && Object.hasOwn(TERRARIUM_PLANT_REQUIREMENTS, s.species) && inHabitat(state, s.x, s.y) && Number.isFinite(s.ageHours) && s.ageHours >= 0) &&
-    Array.isArray(state.bugs) && state.bugs.length <= capacity(state).organisms && state.bugs.every(b => b && typeof b.id === 'string' && (['aphid', 'beetle', 'spider', 'ant'].includes(b.species) || isFlying(b.species)) && inHabitat(state, b.x, b.y) && Number.isFinite(b.energy) && b.energy >= 0 && b.energy <= 100 && validMeal(b.lastMeal, state.updatedAtMs!) && (b.hunger === undefined || (Number.isFinite(b.hunger) && b.hunger >= 0 && b.hunger <= 100)) && (b.carrying === undefined || (b.species === 'ant' && Number.isInteger(b.carrying) && b.carrying >= 0 && b.carrying <= 5)) && Number.isFinite(b.ageHours) && b.ageHours >= 0) &&
-    (state.eggs === undefined || (Array.isArray(state.eggs) && state.eggs.length <= capacity(state).organisms && state.eggs.every(egg => egg && typeof egg.id === 'string' && egg.id.length <= 32 && (['beetle', 'spider', 'ant'].includes(egg.species) || isFlying(egg.species)) && inHabitat(state, egg.x, egg.y) && Number.isFinite(egg.laidAtMs) && egg.laidAtMs <= state.updatedAtMs! && Number.isFinite(egg.hatchesAtMs) && egg.hatchesAtMs > egg.laidAtMs && egg.hatchesAtMs <= egg.laidAtMs + 6 * HOUR_MS))) &&
+    Array.isArray(state.bugs) && state.bugs.length <= capacity(state).organisms && state.bugs.every(b => b && typeof b.id === 'string' && (['aphid', 'beetle', 'ladybug', 'spider', 'ant'].includes(b.species) || isFlying(b.species)) && inHabitat(state, b.x, b.y) && Number.isFinite(b.energy) && b.energy >= 0 && b.energy <= 100 && validMeal(b.lastMeal, state.updatedAtMs!) && (b.hunger === undefined || (Number.isFinite(b.hunger) && b.hunger >= 0 && b.hunger <= 100)) && (b.carrying === undefined || (b.species === 'ant' && Number.isInteger(b.carrying) && b.carrying >= 0 && b.carrying <= 5)) && Number.isFinite(b.ageHours) && b.ageHours >= 0) &&
+    (state.eggs === undefined || (Array.isArray(state.eggs) && state.eggs.length <= capacity(state).organisms && state.eggs.every(egg => egg && typeof egg.id === 'string' && egg.id.length <= 32 && (['beetle', 'ladybug', 'spider', 'ant'].includes(egg.species) || isFlying(egg.species)) && inHabitat(state, egg.x, egg.y) && Number.isFinite(egg.laidAtMs) && egg.laidAtMs <= state.updatedAtMs! && Number.isFinite(egg.hatchesAtMs) && egg.hatchesAtMs > egg.laidAtMs && egg.hatchesAtMs <= egg.laidAtMs + 6 * HOUR_MS))) &&
     state.bugs.length + (state.eggs?.length ?? 0) <= capacity(state).organisms &&
     (state.nests === undefined || (Array.isArray(state.nests) && state.nests.length <= 5 && state.nests.every(nest => nest && typeof nest.id === 'string' && nest.id.length <= 32 && inHabitat(state, nest.x, nest.y) && Number.isInteger(nest.depth) && nest.depth >= 1 && nest.depth <= 5 && Number.isInteger(nest.food) && nest.food >= 0 && nest.food <= nest.depth * 20) && new Set(state.nests.map(nest => `${nest.x},${nest.y}`)).size === state.nests.length)) &&
-    (state.food === undefined || (Array.isArray(state.food) && state.food.length <= 20 && state.food.every(food => food && typeof food.id === 'string' && food.id.length <= 32 && inHabitat(state, food.x, food.y) && Number.isInteger(food.portions) && food.portions >= 1 && food.portions <= 10 && Number.isFinite(food.droppedAtMs) && food.droppedAtMs <= state.updatedAtMs!))) &&
+    (state.food === undefined || (Array.isArray(state.food) && state.food.length <= 20 && state.food.every(food => food && typeof food.id === 'string' && food.id.length <= 32 && inHabitat(state, food.x, food.y) && Number.isInteger(food.portions) && food.portions >= 1 && food.portions <= 10 && Number.isFinite(food.droppedAtMs) && food.droppedAtMs <= state.updatedAtMs! && (food.kind === undefined || food.kind === 'sunflower_seed')))) &&
     (state.webs === undefined || (Array.isArray(state.webs) && state.webs.length <= capacity(state).organisms * TERRARIUM_WEBS_PER_SPIDER && state.webs.every(web => web && typeof web.id === 'string' && web.id.length <= 32 && typeof web.spiderId === 'string' && inHabitat(state, web.x, web.y) && Number.isFinite(web.createdAtMs) && web.createdAtMs <= state.updatedAtMs! && state.bugs!.some(bug => bug.id === web.spiderId && bug.species === 'spider')) && new Set(state.webs.map(web => `${web.x},${web.y}`)).size === state.webs.length && state.bugs.every(bug => state.webs!.filter(web => web.spiderId === bug.id).length <= TERRARIUM_WEBS_PER_SPIDER))) &&
     Array.isArray(state.items) && state.items.length === 2 &&
     ['coin', 'pebble'].every(id => state.items!.filter(item => item.id === id && inHabitat(state, item.x, item.y)).length === 1) &&
