@@ -45,7 +45,7 @@ cargo clippy --all-targets --locked -- -D warnings
 
 导出和备份要求目标不存在。未更新的旧文档逐字保留；报告或注册更新后分别重新导出排行榜或凭据，其他文档仍保留原始内容。数据库和备份包含凭据，应与生产 `data/` 一样限制权限，不进入源码仓。SIGINT/SIGTERM 停止公共和管理 HTTP 服务，校验子进程随服务退出。
 
-公网页面展示 0.8.6「闲看生机」的内嵌 SVG 标志，含主题文字、新叶、游鱼与暖阳；支持深浅主题、小屏幕和减少动态效果设置，无额外图片请求。
+公网页面展示 0.8.6「闲看生机」的粗体 SVG 字标：MiSans Bold 字形转为轮廓，在笔画内融入新叶、水纹和游鱼。支持深浅主题、小屏幕和减少动态效果设置，无额外图片或字体请求。字形来自 Xiaomi MiSans 字体包；字体许可证保留在 `web/admin/assets/MiSans-LICENSE.pdf`。
 
 `web/` 的公共页面、渲染 bundle 和 `web/admin/` 管理台来自生态箱 0.8.6 的 `server/` 与 `dist/console/`；代码按 MIT 许可证保留，字体与图标许可证位于 `web/admin/assets/`。管理台内存标签注明主进程范围。
 

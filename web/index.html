@@ -79,39 +79,39 @@
 @media(max-width:580px){.nav-actions{gap:10px}.theme-toggle{padding:8px}.theme-toggle svg{display:none}.nav-actions .live{font-size:11px}}
 .pager{display:flex;justify-content:center;align-items:center;gap:16px;margin:22px 0}.pager[hidden]{display:none}.pager-button,.replay-load{border:1px solid var(--line);background:var(--surface);color:var(--green);border-radius:9px;padding:10px 16px;font:inherit;cursor:pointer;transition:background .2s,transform .2s}.pager-button:hover:not(:disabled),.replay-load:hover:not(:disabled){background:var(--accent);transform:translateY(-1px)}.pager-button:disabled,.replay-load:disabled{opacity:.5;cursor:default}.pager-label{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}.replay-load{margin:0 24px 16px;font-size:12px}.pager-button:focus-visible,.replay-load:focus-visible{outline:2px solid var(--green);outline-offset:3px}@media(max-width:500px){.pager{gap:10px}.pager-button{padding:9px 12px}.pager-label{font-size:11px}}
 
-.release-art{display:flex;align-items:center;justify-content:center;min-width:0;--logo-leaf:#68865d;--logo-leaf-light:#96ad7b;--logo-water:#7faaa3;--logo-sun:#d9b479;--logo-glass:#e5ede0;--logo-ink:#456342}
-.release-logo{display:block;width:min(100%,320px);height:auto;overflow:visible}.release-logo .logo-leaves{transform-origin:160px 113px;animation:logo-leaf-sway 8s ease-in-out infinite}.release-logo .logo-water{animation:logo-water-drift 7s ease-in-out infinite}.release-logo .logo-fish{animation:logo-fish-drift 9s ease-in-out infinite}.release-logo .logo-title{fill:var(--foreground);font:500 30px MiSans,sans-serif;letter-spacing:6px}.release-logo .logo-version{fill:var(--muted);font:10px MiSans,sans-serif;letter-spacing:3px}
-:root[data-theme="dark"] .release-art{--logo-leaf:#a0bf88;--logo-leaf-light:#c0d3a3;--logo-water:#8abdb5;--logo-sun:#dfbd87;--logo-glass:#233c30;--logo-ink:#b3cda2}
-@keyframes logo-leaf-sway{0%,100%{transform:rotate(-2deg)}50%{transform:rotate(2deg)}}@keyframes logo-water-drift{0%,100%{transform:translateY(0)}50%{transform:translateY(2px)}}@keyframes logo-fish-drift{0%,100%{transform:translateX(-3px)}50%{transform:translateX(3px)}}
-@media(max-width:580px){.hero{gap:4px;padding-bottom:24px}.release-art{order:-1;justify-content:flex-start}.release-logo{width:210px;margin:-12px 0 12px}.hero h1{font-size:32px}.hero .eyebrow{margin-bottom:12px}}
-@media(prefers-reduced-motion:reduce){.release-logo .logo-leaves,.release-logo .logo-water,.release-logo .logo-fish{animation:none}}
+
+
+.release-art{display:flex;align-items:center;justify-content:center;min-width:0;--logo-ink:#355a45;--logo-leaf:#789661;--logo-water:#729b91}
+.release-logo{display:block;width:min(100%,280px);height:auto;overflow:visible}.release-logo .logo-version{fill:var(--muted);font:11px MiSans,sans-serif;letter-spacing:3px}.release-logo .wordmark-sprout{transform-origin:56px 40px;animation:wordmark-sway 8s ease-in-out infinite}.release-logo .wordmark-ripple{animation:wordmark-ripple 7s ease-in-out infinite}
+:root[data-theme="dark"] .release-art{--logo-ink:#d4e1c4;--logo-leaf:#99bb7e;--logo-water:#8ab9b0}
+@keyframes wordmark-sway{0%,100%{transform:rotate(-2deg)}50%{transform:rotate(2deg)}}@keyframes wordmark-ripple{0%,100%{opacity:.8}50%{opacity:1}}
+@media(max-width:580px){.hero{gap:4px;padding-bottom:24px}.release-art{order:-1;justify-content:flex-start}.release-logo{width:190px;margin:-12px 0 12px}.hero h1{font-size:32px}.hero .eyebrow{margin-bottom:12px}}
+@media(prefers-reduced-motion:reduce){.release-logo .wordmark-sprout,.release-logo .wordmark-ripple{animation:none}}
 </style>
 </head>
 <body>
 <header><div class="wrap nav"><div class="brand"><span class="mark" aria-hidden="true"></span>生态箱<span class="nav-label">OBSERVATORY</span></div><div class="nav-actions"><button type="button" class="theme-toggle" id="theme-toggle" aria-label="主题：跟随系统"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/></svg><span>跟随系统</span></button><div class="live" id="connection" data-state="loading"><span class="dot"></span><span id="connection-label">连接中</span></div></div></div></header>
 <main class="wrap">
 <section id="announcements" class="announcements" aria-label="服务端公告" aria-live="polite" hidden></section>
-<section class="hero"><div><p class="eyebrow">CORTICO / LIVING ECOSYSTEMS</p><h1>一方天地，<br>自有<span>生机。</span></h1><p class="intro">观察植物生长、虫鱼觅食，看看每个生态箱的近况。</p></div><div class="release-art"><svg class="release-logo" viewBox="0 0 320 260" role="img" aria-labelledby="release-logo-title release-logo-desc" xmlns="http://www.w3.org/2000/svg">
-<title id="release-logo-title">闲看生机 · 0.8.6</title><desc id="release-logo-desc">一轮暖阳下，玻璃箱里的新叶轻摆，水中一尾小鱼悠游。</desc>
-<defs><clipPath id="logo-glass-clip"><path d="M160 26c-39 0-62 27-62 63v46c0 27 20 44 62 44s62-17 62-44V89c0-36-23-63-62-63Z"/></clipPath></defs>
-<ellipse cx="160" cy="182" rx="71" ry="6" fill="var(--logo-ink)" opacity=".08"/>
-<path d="M72 120c-17-47 12-92 58-101M247 62c25 42 12 87-23 111" fill="none" stroke="var(--logo-ink)" stroke-width="1" opacity=".22" stroke-linecap="round"/>
-<circle cx="216" cy="42" r="21" fill="var(--logo-sun)" opacity=".8"/><path d="M184 42h56" stroke="var(--page)" stroke-width="3"/>
-<path d="M160 26c-39 0-62 27-62 63v46c0 27 20 44 62 44s62-17 62-44V89c0-36-23-63-62-63Z" fill="var(--logo-glass)" fill-opacity=".55" stroke="var(--logo-ink)" stroke-width="1.6"/>
-<g clip-path="url(#logo-glass-clip)">
-<path d="M94 149c21-20 43-12 65-10 25 3 45 0 67-11v56H94Z" fill="var(--logo-leaf-light)" opacity=".45"/>
-<g class="logo-water"><path d="M93 135c32-15 55-9 73-4 26 8 44 4 61-3v58H93Z" fill="var(--logo-water)" opacity=".35"/><path d="M99 135c27-12 48-9 67-4 21 6 38 6 54-1" fill="none" stroke="var(--logo-water)" stroke-width="1.4"/></g>
-<g class="logo-leaves"><path d="M158 144c5-35 4-55-5-80" fill="none" stroke="var(--logo-ink)" stroke-width="2.4" stroke-linecap="round"/>
-<path d="M159 111c-26 0-43-13-45-34 26-1 44 10 45 34Z" fill="var(--logo-leaf)"/><path d="M158 111l-30-24" stroke="var(--page)" stroke-width="1" opacity=".55"/>
-<path d="M159 92c0-23 14-40 37-43-1 24-15 39-37 43Z" fill="var(--logo-leaf-light)"/><path d="M161 89l23-27" stroke="var(--page)" stroke-width="1" opacity=".55"/>
-<path d="M159 132c-17 0-29-7-34-20 18-3 30 4 34 20Z" fill="var(--logo-leaf-light)"/>
+<section class="hero"><div><p class="eyebrow">CORTICO / LIVING ECOSYSTEMS</p><h1>一方天地，<br>自有<span>生机。</span></h1><p class="intro">观察植物生长、虫鱼觅食，看看每个生态箱的近况。</p></div><div class="release-art"><svg class="release-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 288 280" role="img" aria-labelledby="release-logo-title release-logo-desc">
+<title id="release-logo-title">闲看生机 · 0.8.6</title><desc id="release-logo-desc">以粗体的闲看生机四字组成字标：闲字的点是一片叶，生字的撇化作新芽，看字的目中泛起水纹，机字的笔画中藏着游鱼。</desc>
+<defs>
+<mask id="wordmark-xian-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="288" height="280"><rect width="288" height="280" fill="white"/><path d="M40 26H70V56H40Z" fill="black"/></mask>
+<mask id="wordmark-sheng-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="288" height="280"><rect width="288" height="280" fill="white"/><path d="M32 138H69V186H32Z" fill="black"/></mask>
+<clipPath id="wordmark-kan-clip"><path transform="translate(150 118) scale(0.104 -0.104)" d="M948 438H414Q401 415 390 401H863V-74H736V-43H332V-75H205V205Q161 168 90 118L44 250Q174 328 256 438H61V539H317L335 576H125V663H367Q374 687 378 704Q186 696 112 695L104 800Q281 802 504.5 815.0Q728 828 894 844L904 736Q682 719 518 711L506 663H884V576H479L465 539H948ZM332 275H736V316H332ZM736 198H332V157H736ZM332 83V42H736V83Z"/></clipPath>
+<clipPath id="wordmark-ji-clip"><path transform="translate(150 226) scale(0.104 -0.104)" d="M949 254Q949 221 947.5 161.0Q946 101 944 59Q942 14 931.5 -9.5Q921 -33 898.0 -42.5Q875 -52 833 -52H775Q719 -52 696.0 -26.0Q673 0 673 67V664H557V438Q557 290 547.5 208.0Q538 126 508.5 61.5Q479 -3 415 -74L301 2Q355 60 380.5 105.5Q406 151 415.5 208.0Q425 265 427 366L379 267Q345 292 287 330V-75H161V278Q120 199 72 124L46 320Q118 427 161 558V561H61V685H161V837H287V685H385V561H287V480L349 441L427 393V439V798H802V103Q802 85 805.0 79.5Q808 74 817 74H825Q835 74 838.0 81.0Q841 88 842 114L843 171L846 277Z"/></clipPath>
+</defs>
+<g class="logo-title" fill="var(--logo-ink)" aria-label="闲看生机">
+<g mask="url(#wordmark-xian-cut)"><path transform="translate(32 118) scale(0.104 -0.104)" d="M256 611Q230 641 182.5 689.5Q135 738 102 769L189 858Q276 782 349 712ZM366 814H915V61Q915 9 901.5 -19.0Q888 -47 856.0 -58.5Q824 -70 764 -70H653L628 51H721Q753 51 767.5 55.5Q782 60 786.5 70.5Q791 81 791 104V692H366ZM701 137Q658 179 563 256V0H437V243Q377 159 283 81L214 211Q338 294 417 433H260V556H437V649H563V556H739V433H563V393Q579 380 636 338Q735 262 767 235ZM213 -70H83V618H213Z"/></g>
+<g class="wordmark-sprout"><path d="M43 29C58 26 69 32 70 47 57 49 47 42 43 29Z" fill="var(--logo-leaf)"/><path d="m49 33 15 10" fill="none" stroke="var(--page)" stroke-width="1.5" stroke-linecap="round"/></g>
+<path transform="translate(150 118) scale(0.104 -0.104)" d="M948 438H414Q401 415 390 401H863V-74H736V-43H332V-75H205V205Q161 168 90 118L44 250Q174 328 256 438H61V539H317L335 576H125V663H367Q374 687 378 704Q186 696 112 695L104 800Q281 802 504.5 815.0Q728 828 894 844L904 736Q682 719 518 711L506 663H884V576H479L465 539H948ZM332 275H736V316H332ZM736 198H332V157H736ZM332 83V42H736V83Z"/>
+<g clip-path="url(#wordmark-kan-clip)"><path class="wordmark-ripple" d="M170 104Q187 97 205 104T251 103V129H170Z" fill="var(--logo-water)"/><path d="M179 110q15-6 30-1t31 0" fill="none" stroke="var(--page)" stroke-width="1.4" opacity=".8"/></g>
+<g mask="url(#wordmark-sheng-cut)"><path transform="translate(32 226) scale(0.104 -0.104)" d="M597 94H949V-41H83V94H452V256H153V393H452V540H268Q231 463 182 393L60 464Q119 538 153.5 616.5Q188 695 216 806L350 776Q340 741 318 671H452V838H597V671H912V540H597V393H875V256H597Z"/></g>
+<path d="M39 185C38 165 48 149 66 140 69 160 60 179 39 185Z" fill="var(--logo-leaf)"/><path d="m45 177 15-26" fill="none" stroke="var(--page)" stroke-width="1.5" stroke-linecap="round"/>
+<path transform="translate(150 226) scale(0.104 -0.104)" d="M949 254Q949 221 947.5 161.0Q946 101 944 59Q942 14 931.5 -9.5Q921 -33 898.0 -42.5Q875 -52 833 -52H775Q719 -52 696.0 -26.0Q673 0 673 67V664H557V438Q557 290 547.5 208.0Q538 126 508.5 61.5Q479 -3 415 -74L301 2Q355 60 380.5 105.5Q406 151 415.5 208.0Q425 265 427 366L379 267Q345 292 287 330V-75H161V278Q120 199 72 124L46 320Q118 427 161 558V561H61V685H161V837H287V685H385V561H287V480L349 441L427 393V439V798H802V103Q802 85 805.0 79.5Q808 74 817 74H825Q835 74 838.0 81.0Q841 88 842 114L843 171L846 277Z"/>
+<g clip-path="url(#wordmark-ji-clip)"><path d="M208 213c11-7 20-6 31-2l17 9v19h-48Z" fill="var(--logo-water)"/><path d="M225 217c4-4 10-4 14 0-4 4-10 4-14 0l-4 3v-6Z" fill="var(--page)"/></g>
 </g>
-<g class="logo-fish" fill="var(--logo-ink)"><path d="M177 151c8-10 20-10 28-2-7 9-19 12-28 2l-8 7v-14Z" opacity=".85"/><circle cx="198" cy="149" r="1.4" fill="var(--logo-glass)"/></g>
-<path d="M107 88c0-23 11-41 28-48" fill="none" stroke="var(--page)" stroke-width="3" opacity=".75" stroke-linecap="round"/>
-</g>
-<path d="M72 69c8-4 15-4 22 0m142 40c7-4 13-4 20 0" fill="none" stroke="var(--logo-ink)" stroke-width="1.2" stroke-linecap="round" opacity=".4"/>
-<text x="163" y="222" text-anchor="middle" class="logo-title">闲看生机</text>
-<text x="160" y="244" text-anchor="middle" class="logo-version">生态箱 · 0.8.6</text>
+<text class="logo-version" x="144" y="262" text-anchor="middle">生态箱 / 0.8.6</text>
 </svg></div></section>
 <section class="overview" aria-label="生态箱概览"><div class="stat"><strong id="box-count">—</strong><span id="box-count-label">地箱</span></div><div class="stat"><strong id="plant-count">—</strong><span>植物</span></div><div class="stat"><strong id="animal-count">—</strong><span id="animal-count-label">虫子</span></div></section>
 <section aria-labelledby="gallery-title"><div class="section-top"><h2 class="section-title" id="gallery-title">生态箱图鉴 <small>COLLECTION</small></h2><div class="tools"><div class="tabs" role="group" aria-label="生态箱类型"><button class="tab" data-kind="land" aria-pressed="true">生态箱·地</button><button class="tab" data-kind="water" aria-pressed="false">生态箱·水</button></div><div class="search-wrap"><input class="search" id="search" type="text" maxlength="100" role="searchbox" placeholder="搜索名称或 ID" aria-label="搜索生态箱名称或 ID"><button id="clear-search" class="clear-search" aria-label="清除搜索" hidden></button></div></div></div>
