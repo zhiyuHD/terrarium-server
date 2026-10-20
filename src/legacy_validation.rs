@@ -124,6 +124,7 @@ mod tests {
         state["plants"][0]["growthHours"] = serde_json::json!(30);
         state["plants"][0]["stage"] = serde_json::json!(3);
         state["plants"][0]["seedRounds"] = serde_json::json!(1);
+        state["plants"][0]["leafDamage"] = serde_json::json!(40);
         state["plants"][1]["species"] = serde_json::json!("mint");
         state["bugs"] = serde_json::json!([{
             "id": "bug-new-neighbor", "species": "ladybug", "x": 1, "y": 1,
@@ -135,6 +136,9 @@ mod tests {
         }]);
         assert_eq!(validator.validate(&state).await.unwrap(), state);
         state["plants"][0]["seedRounds"] = serde_json::json!(2);
+        assert!(validator.validate(&state).await.is_err());
+        state["plants"][0]["seedRounds"] = serde_json::json!(1);
+        state["plants"][0]["leafDamage"] = serde_json::json!(101);
         assert!(validator.validate(&state).await.is_err());
         assert_eq!(validator.validate(&land()).await.unwrap(), land());
     }

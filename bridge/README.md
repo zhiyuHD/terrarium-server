@@ -7,4 +7,4 @@ Temporary validation fallback for the Rust write service. `legacy-src/` contains
 
 This fallback must remain until Rust validation covers all optional fields, collection specimens, replay frames and legacy migrations with differential tests. The write service still requires Node 22 or newer. Startup probes the worker before opening a listener. No worker is started in the default read-only mode.
 
-校验器兼容 0.8.7 第一阶段的 sunflower、mint、ladybug、葵花籽食物和持久落籽轮次；旧存档、历史与收藏仍按原协议校验，无存储迁移。
+校验器兼容 0.8.7 第一阶段的 sunflower、mint、ladybug、葵花籽食物和持久落籽轮次，以及可选的叶片采食损伤（leafDamage）；旧存档、历史与收藏仍按原协议校验，无存储迁移。

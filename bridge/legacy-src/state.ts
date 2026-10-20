@@ -4,7 +4,7 @@ import { validCareAlerts } from './care-alerts.ts';
 import { recordDeath, validDeaths, validMeal, type DeathHistory } from './deaths.ts';
 import { validCollection, type CollectionItem } from './collection.ts';
 import { score, TERRARIUM_SCORE_VERSION } from './scoring.ts';
-import { plantCareAdvice, sunflowerSeedRounds, TERRARIUM_SUNFLOWER } from './habitat.ts';
+import { plantCareAdvice, TERRARIUM_LEAF_DAMAGE, sunflowerSeedRounds, TERRARIUM_SUNFLOWER } from './habitat.ts';
 import { validateWatering, waterAdded, type WateringOptions } from './habitat.ts';
 import { isFlying, flightDraw, TERRARIUM_FLY_ACTION_INTERVAL_MS, TERRARIUM_FLY_MOVE_PROBABILITY, type FlyingSpecies } from './flight.ts';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
@@ -18,7 +18,7 @@ export type PlantId = string;
 export type ItemId = 'coin' | 'pebble';
 export type SeedSpecies = PlantSpecies;
 export type BugSpecies = 'aphid' | 'beetle' | 'ladybug' | 'spider' | 'ant' | FlyingSpecies;
-export interface PlantState { id: PlantId; species: PlantSpecies; x: number; y: number; moisture: number; growthHours: number; stage: number; dry: boolean; health: number; healthWarning?: boolean; seedRounds?: number }
+export interface PlantState { id: PlantId; species: PlantSpecies; x: number; y: number; moisture: number; growthHours: number; stage: number; dry: boolean; health: number; healthWarning?: boolean; seedRounds?: number; leafDamage?: number }
 export interface SeedState { id: string; species: SeedSpecies; x: number; y: number; ageHours: number }
 export interface BugState { id: string; species: BugSpecies; x: number; y: number; ageHours: number; energy: number; hunger?: number; lastMeal?: { atMs: number; kind: 'foraging' }; carrying?: number; role?: 'queen' | 'worker'; inside?: NestPosition }
 export interface EggState { id: string; species: 'beetle' | 'ladybug' | 'spider' | 'ant' | FlyingSpecies; x: number; y: number; laidAtMs: number; hatchesAtMs: number; inside?: NestPosition }
@@ -335,6 +335,7 @@ export function advance(state: TerrariumState, nowMs: number, timezone: string):
   const damage: PlantDamage = (plant, amount, cause) => {
     const loss = Math.min(plant.health, amount);
     plant.health -= loss;
+    if (cause === '蚂蚁采集' && loss > 0) plant.leafDamage = Math.min(100, (plant.leafDamage ?? 0) + loss * TERRARIUM_LEAF_DAMAGE.perHarvestHealth);
     if (loss <= 0) return;
     const causes = losses.get(plant.id) ?? new Map<string, number>();
     causes.set(cause, (causes.get(cause) ?? 0) + loss);
@@ -386,7 +387,10 @@ export function advance(state: TerrariumState, nowMs: number, timezone: string):
       const needs = TERRARIUM_PLANT_REQUIREMENTS[plant.species];
       const light = daylight(state, plant.x, plant.y);
       const hydrated = plant.moisture >= needs.minMoisture && plant.moisture <= needs.maxMoisture;
-      if (before === 'day' && hydrated && light >= needs.minLight && light <= needs.maxLight) plant.growthHours += hours * (plant.species === 'basil' && state.plants.some(p => p.species === 'bean' && p.health >= 60 && Math.abs(p.x - plant.x) + Math.abs(p.y - plant.y) === 1) ? 1.1 : 1);
+      if (before === 'day' && hydrated && light >= needs.minLight && light <= needs.maxLight) {
+        plant.growthHours += hours * (plant.species === 'basil' && state.plants.some(p => p.species === 'bean' && p.health >= 60 && Math.abs(p.x - plant.x) + Math.abs(p.y - plant.y) === 1) ? 1.1 : 1);
+        if (plant.leafDamage !== undefined && plant.health >= TERRARIUM_PLANT_RECOVERED_HEALTH) plant.leafDamage = Math.max(0, plant.leafDamage - hours * TERRARIUM_LEAF_DAMAGE.recoveryPerGrowthHour);
+      }
       if (!hydrated) damage(plant, hours * .5, plant.moisture < needs.minMoisture ? '水分过低' : '水分过高');
       const stage = STAGES.reduce((n, threshold, index) => plant.growthHours >= threshold ? index : n, 0);
       if (stage !== plant.stage) {
@@ -621,7 +625,7 @@ export function validState(value: unknown): value is TerrariumState {
   if (!validDevelopment(state, 'land') || !validCareAlerts(state.careAlerts) || !validDeaths(state.deaths, state.updatedAtMs!, capacity(state).size) || !validCollection(state.collection, 'land', capacity(state).collection) || (state.irrigation !== undefined && (!Array.isArray(state.irrigation) || state.irrigation.length > capacity(state).size ** 2 || new Set(state.irrigation.map(c => `${c?.x},${c?.y}`)).size !== state.irrigation.length || !state.irrigation.every(c => c && inHabitat(state, c.x, c.y) && Number.isFinite(c.targetMoisture) && c.targetMoisture >= 0 && c.targetMoisture <= 100 && Number.isFinite(c.intervalMinutes) && c.intervalMinutes >= 1 && c.intervalMinutes <= 1440 && Number.isFinite(c.lastWateredAtMs))))) return false;
   return state.version === 3 && (state.name === undefined || validName(state.name)) && validHabitat(state) && validReplays(state) && Number.isFinite(state.updatedAtMs) && Number.isSafeInteger(state.nextId) && state.nextId! >= 1 &&
     Array.isArray(state.plants) && state.plants.length <= capacity(state).organisms &&
-    state.plants.every(p => p && typeof p.id === 'string' && p.id.length <= 32 && Object.hasOwn(TERRARIUM_PLANT_REQUIREMENTS, p.species) && inHabitat(state, p.x, p.y) && Number.isFinite(p.moisture) && p.moisture >= 0 && p.moisture <= 100 && Number.isFinite(p.growthHours) && p.growthHours >= 0 && Number.isInteger(p.stage) && p.stage >= 0 && p.stage <= 3 && typeof p.dry === 'boolean' && Number.isFinite(p.health) && p.health >= 0 && p.health <= 100 && (p.healthWarning === undefined || typeof p.healthWarning === 'boolean') && (p.seedRounds === undefined || (p.species === 'sunflower' && Number.isSafeInteger(p.seedRounds) && p.seedRounds >= 0 && p.seedRounds <= sunflowerSeedRounds(p.growthHours)))) &&
+    state.plants.every(p => p && typeof p.id === 'string' && p.id.length <= 32 && Object.hasOwn(TERRARIUM_PLANT_REQUIREMENTS, p.species) && inHabitat(state, p.x, p.y) && Number.isFinite(p.moisture) && p.moisture >= 0 && p.moisture <= 100 && Number.isFinite(p.growthHours) && p.growthHours >= 0 && Number.isInteger(p.stage) && p.stage >= 0 && p.stage <= 3 && typeof p.dry === 'boolean' && Number.isFinite(p.health) && p.health >= 0 && p.health <= 100 && (p.healthWarning === undefined || typeof p.healthWarning === 'boolean') && (p.leafDamage === undefined || (Number.isFinite(p.leafDamage) && p.leafDamage >= 0 && p.leafDamage <= 100)) && (p.seedRounds === undefined || (p.species === 'sunflower' && Number.isSafeInteger(p.seedRounds) && p.seedRounds >= 0 && p.seedRounds <= sunflowerSeedRounds(p.growthHours)))) &&
     Array.isArray(state.seeds) && state.seeds.length <= capacity(state).organisms && state.plants.length + state.seeds.length <= capacity(state).organisms && state.seeds.every(s => s && typeof s.id === 'string' && Object.hasOwn(TERRARIUM_PLANT_REQUIREMENTS, s.species) && inHabitat(state, s.x, s.y) && Number.isFinite(s.ageHours) && s.ageHours >= 0) &&
     Array.isArray(state.bugs) && state.bugs.length <= capacity(state).organisms && state.bugs.every(b => b && typeof b.id === 'string' && (['aphid', 'beetle', 'ladybug', 'spider', 'ant'].includes(b.species) || isFlying(b.species)) && inHabitat(state, b.x, b.y) && Number.isFinite(b.energy) && b.energy >= 0 && b.energy <= 100 && validMeal(b.lastMeal, state.updatedAtMs!) && (b.hunger === undefined || (Number.isFinite(b.hunger) && b.hunger >= 0 && b.hunger <= 100)) && (b.carrying === undefined || (b.species === 'ant' && Number.isInteger(b.carrying) && b.carrying >= 0 && b.carrying <= 5)) && Number.isFinite(b.ageHours) && b.ageHours >= 0) &&
     (state.eggs === undefined || (Array.isArray(state.eggs) && state.eggs.length <= capacity(state).organisms && state.eggs.every(egg => egg && typeof egg.id === 'string' && egg.id.length <= 32 && (['beetle', 'ladybug', 'spider', 'ant'].includes(egg.species) || isFlying(egg.species)) && inHabitat(state, egg.x, egg.y) && Number.isFinite(egg.laidAtMs) && egg.laidAtMs <= state.updatedAtMs! && Number.isFinite(egg.hatchesAtMs) && egg.hatchesAtMs > egg.laidAtMs && egg.hatchesAtMs <= egg.laidAtMs + 6 * HOUR_MS))) &&

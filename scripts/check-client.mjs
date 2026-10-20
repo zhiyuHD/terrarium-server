@@ -14,7 +14,7 @@ try{
  for(const kind of['land','water']){const state=kind==='land'?newState(Date.now()):newAquarium(Date.now());const client=new LeaderboardClient({url,id:'',automaticIds:true,kind,credentialsFile:join(dir,kind,'report-credentials.json'),incrementalReports:true});clients.push(client);
  await client.report(state,'day');assert.equal(client.status().state,'synced');assert.equal(client.status().transport,'ws');const id=client.id;
  if(kind==='land'){
- state.plants[0]={...state.plants[0],species:'sunflower',growthHours:30,stage:3,seedRounds:1};state.plants[1].species='mint';
+ state.plants[0]={...state.plants[0],species:'sunflower',growthHours:30,stage:3,seedRounds:1,leafDamage:40};state.plants[1].species='mint';
  state.bugs=[{id:'bug-neighbor-protocol',species:'ladybug',x:1,y:1,ageHours:1,energy:80,hunger:10}];
  state.food=[{id:'food-neighbor-protocol',kind:'sunflower_seed',x:0,y:0,portions:3,droppedAtMs:state.updatedAtMs}];
  await client.report(state,'day');assert.equal(client.status().state,'synced');
