@@ -1,7 +1,7 @@
 <!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs -->
 # terrarium-server
 
-生态箱独立服务端，使用 Rust + SQLite。兼容现有 World 的 HTTP/WS 协议与 TS 存档，可通过 Native 原子发布控制器运行。公共接口仅监听回环地址，管理台使用独立私网端口。
+生态箱独立服务端，生产 HTTP/WS 与存储使用 Rust + SQLite。兼容现有 World 的 HTTP/WS 协议与 TS 存档，可通过 Native 原子发布控制器运行。公共接口仅监听回环地址，管理台使用独立私网端口。
 
 已实现：
 
