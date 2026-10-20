@@ -11,7 +11,7 @@ use terrarium_server::{
 #[command(version, about)]
 struct Cli {
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 #[derive(Subcommand)]
 enum Command {
@@ -71,7 +71,11 @@ enum Command {
 }
 #[tokio::main]
 async fn main() -> Result<()> {
-    match Cli::parse().command {
+    let command = Cli::parse()
+        .command
+        .map(Ok)
+        .unwrap_or_else(managed_command)?;
+    match command {
         Command::ImportLegacy {
             from,
             database,
@@ -120,6 +124,10 @@ async fn main() -> Result<()> {
             }
             let store = Store::existing(database)?;
             store.check()?;
+            let ingestion = enable_writes.then(|| Ingestion::new(store.clone()));
+            if let Some(ingestion) = &ingestion {
+                ingestion.ready().await?;
+            }
             let listener = tokio::net::TcpListener::bind(listen)
                 .await
                 .context("Listen failed")?;
@@ -135,11 +143,11 @@ async fn main() -> Result<()> {
             if admin_listener.is_some() {
                 store.admin_token(enable_writes)?;
             }
-            let ingestion = enable_writes.then(|| Ingestion::new(store.clone()));
             let app = App {
                 store,
                 ingestion,
                 release_id: std::env::var("CORTICO_TERRARIUM_RELEASE_ID").ok(),
+                release_root: std::env::var_os("CORTICO_TERRARIUM_DEPLOY_ROOT").map(PathBuf::from),
             };
             let private = if let Some(listener) = admin_listener {
                 let bind = listener.local_addr()?;
@@ -183,6 +191,39 @@ async fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn managed_command() -> Result<Command> {
+    let root = PathBuf::from(
+        std::env::var("CORTICO_TERRARIUM_DEPLOY_ROOT")
+            .context("Supply a subcommand or run through the release controller")?,
+    );
+    let id = std::env::var("CORTICO_TERRARIUM_RELEASE_ID")
+        .context("Managed startup requires a release ID")?;
+    anyhow::ensure!(
+        root.is_absolute() && terrarium_server::assets::valid_release_id(&id),
+        "Invalid managed deployment identity"
+    );
+    let port = std::env::var("PORT")
+        .unwrap_or_else(|_| "8787".into())
+        .parse::<u16>()?;
+    let admin_listen = std::env::var("CORTICO_TERRARIUM_ADMIN_HOST")
+        .ok()
+        .map(|host| {
+            let port =
+                std::env::var("CORTICO_TERRARIUM_ADMIN_PORT").unwrap_or_else(|_| "8788".into());
+            format!("{host}:{port}").parse::<SocketAddr>()
+        })
+        .transpose()?;
+    Ok(Command::Serve {
+        database: std::env::var_os("CORTICO_TERRARIUM_DATABASE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| root.join("data/terrarium.sqlite")),
+        listen: SocketAddr::from(([127, 0, 0, 1], port)),
+        enable_writes: true,
+        admin_listen,
+        admin_cidr: std::env::var("CORTICO_TERRARIUM_ADMIN_ALLOWED_CIDR").ok(),
+    })
 }
 
 async fn shutdown_signal() {

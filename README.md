@@ -1,11 +1,11 @@
-<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs -->
+<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs -->
 # terrarium-server
 
-生态箱独立服务端，使用 Rust + SQLite 逐步迁移。生产环境仍运行 `cortico-world-terrarium` 的 TypeScript 服务端；本仓库仍为迁移预览，公共接口仅监听回环地址。管理和反馈接口已迁移，尚未进行生产快照与负载验证。
+生态箱独立服务端，使用 Rust + SQLite。兼容现有 World 的 HTTP/WS 协议与 TS 存档，可通过 Native 原子发布控制器运行。公共接口仅监听回环地址，管理台使用独立私网端口。
 
 已实现：
 
-- 排行榜、摘要、分页观察页、单箱状态与按需回放读取。
+- 排行榜、摘要、分页观察页、单箱状态与按需回放读取。历史发布资源按 release ID 读取，打开的页面保留对应版本的渲染资源。
 - 自动分配 ID/token，兼容旧 ID 注册，Bearer 鉴权，HTTP 完整上报和 WS 完整/增量上报。提交上限 8 MiB，每连接最多 8 个待处理报告，WS 每 30 秒检查心跳。
 - 与 TS 一致的规范 JSON SHA-256、基线 revision/hash 和目标 hash 校验。首次连接、重连及校验失败要求完整状态；成功确认在 SQLite 事务提交后发送。
 - 最低客户端版本、HTTP Push 开关及定时生效规则，忽略提交时返回 `accepted: false`。协议升级提醒使用独立记录，保留既有通知 ID，不进入管理员公告列表；支持公开公告及鉴权公告轮询。
@@ -15,9 +15,9 @@
 - SQLite WAL，持久写连接、独立读连接、`synchronous=FULL`。每箱一行，比较 revision 后更新；运行时数据库操作在阻塞线程执行。
 - 旧 JSON 导入、导出、完整性检查、在线备份。导入默认预览，`--apply` 才写入，只允许导入空库。ID/token、公告游标、反馈、云控和管理员凭据保留，未知状态字段保留。
 
-状态校验和 v1/v2 存档升级暂时通过常驻 Node 子进程复用原 TS 校验器，详见 [bridge/README.md](bridge/README.md)。写入预览仍需要 Node 22+；只有读服务不启动该进程。原生 Rust 校验器覆盖全部可选字段并通过差分测试后才能移除此 fallback。
+状态校验和 v1/v2 存档升级暂时通过常驻 Node 子进程复用原 TS 校验器，详见 [bridge/README.md](bridge/README.md)。写服务仍需要 Node 22+；启动时先检查校验子进程能否应答，失败时不开监听端口。只有读服务不启动该进程。原生 Rust 校验器覆盖全部可选字段并通过差分测试后才能移除此 fallback。
 
-默认 `serve` 禁止写入，`/health` 返回 `readOnly: true`、`websocketPush: false`。显式指定 `--enable-writes` 才开放已迁移的写入接口。反馈与管理写操作在只读模式返回 501。私网管理端口通过 `--admin-listen` 单独启用，只接受私有或回环 IPv4，允许网段默认是监听 IP 的 `/32`。
+命令行 `serve` 默认禁止写入，`/health` 返回 `readOnly: true`、`websocketPush: false`。指定 `--enable-writes` 开放写入接口。反馈与管理写操作在只读模式返回 501。私网管理端口通过 `--admin-listen` 单独启用，只接受私有或回环 IPv4，允许网段默认是监听 IP 的 `/32`。
 
 ## 运行
 
@@ -62,10 +62,27 @@ node --import tsx /path/to/terrarium-server/scripts/check-admin.mjs /path/to/Cor
 
 管理兼容脚本用旧 TS 管理 CLI 操作 Rust，再停止 Rust 并导出到临时目录；旧 TS 服务端在相同回环端口启动，检查状态、分数、凭据、公告、反馈与云控，并继续写入反馈和公告。所有记录均为合成数据。
 
-## 后续迁移
+## 生产部署与跨格式迁移
 
-1. 补齐 Native 发布包及历史发布资源路由；将校验与旧存档升级移植到 Rust，移除 Node fallback。
-2. 在一致的生产快照上校验箱子、凭据、排行榜、通知游标及导出结果，再进行影子读取和负载验证。
-3. 安排停机迁移。SQLite 与旧 JSON 写入格式不同，使用新的 data epoch；迁移完成前不允许跨格式自动回滚。回滚前须停写并导出最新数据，不能仅切换旧二进制。
+详见 [docs/deployment.md](docs/deployment.md)。Native 发布包使用 data epoch 2，旧 JSON 发布包使用 epoch 1。同 epoch 的更新沿用控制器；跨格式切换由迁移命令停写、备份、导入、检查导出后执行，回滚先导出最新 SQLite 数据。管理员凭据仍在库内，旧 `admin.mjs` 通过 `data/admin-token` 读取相同凭据。
+
+```sh
+node scripts/pack-release.mjs --id server-rust-example --revision <git-sha> --output /path/to/new-release
+# 在目标主机安装，先保持当前版本服务。
+node /path/to/new-release/release.mjs install --root /path/to/deployment --source /path/to/new-release
+# 默认只预览；--apply 才停止用户服务并迁移。
+node scripts/migrate-storage.mjs migrate --root /path/to/deployment --id server-rust-example
+node scripts/migrate-storage.mjs migrate --root /path/to/deployment --id server-rust-example --apply
+node scripts/migrate-storage.mjs rollback --root /path/to/deployment --apply
+```
+
+在目标主机上用临时用户服务演练迁移、带最新数据回滚、启动失败恢复和中断启动检查：
+
+```sh
+node scripts/check-migration.mjs /path/to/installed-ts-release /path/to/native-release
+node scripts/check-snapshot.mjs /path/to/legacy/server.mjs /path/to/isolated-snapshot
+```
+
+后续将校验与旧存档升级移植到 Rust，移除 Node fallback，并持续测量实际提交延迟和查询负载。
 
 当前使用一个 SQLite 数据库，保留表级边界。是否拆分数据库或增加缓存，由提交延迟、WAL 大小和查询负载的测量决定。

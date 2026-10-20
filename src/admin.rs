@@ -109,7 +109,7 @@ pub fn router(app: App, network: AdminNetwork) -> Router {
         .fallback(handle)
         .with_state(AdminState { app, network, metrics })
         .layer(axum::middleware::map_response(|mut response: Response| async move {
-            response.headers_mut().insert("cache-control", "no-store".parse().unwrap());
+            if !response.headers().contains_key("cache-control") {response.headers_mut().insert("cache-control", "no-store".parse().unwrap());}
             response.headers_mut().insert("x-content-type-options", "nosniff".parse().unwrap());
             response.headers_mut().insert("content-security-policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'".parse().unwrap());
             response
@@ -202,11 +202,30 @@ async fn dispatch(
 ) -> std::result::Result<Response, OperationError> {
     let path = request.uri().path().to_owned();
     let method = request.method().clone();
+    if method == Method::GET && path.starts_with("/releases/") {
+        let asset = crate::assets::historical(state.app.release_root, path, true)
+            .await
+            .map_err(|_| OperationError::new(500, "Asset read failed"))?
+            .ok_or_else(|| OperationError::new(404, "Not found"))?;
+        return Ok((
+            [
+                ("content-type", asset.mime),
+                ("cache-control", "public, max-age=31536000, immutable"),
+            ],
+            asset.bytes,
+        )
+            .into_response());
+    }
     if !path.starts_with("/api/admin/") {
         if method == Method::GET
             && let Some((mime, bytes)) = asset(&path)
         {
-            return Ok(([("content-type", mime)], bytes).into_response());
+            let page = if path == "/" {
+                crate::assets::pin_admin(bytes, state.app.release_id.as_deref())
+            } else {
+                bytes.to_vec()
+            };
+            return Ok(([("content-type", mime)], page).into_response());
         }
         return Err(OperationError::new(404, "Not found"));
     }

@@ -42,7 +42,20 @@ impl Worker {
     }
 }
 impl LegacyValidator {
+    pub async fn ready(&self) -> Result<()> {
+        let reply = self.exchange(&Value::Null).await?;
+        ensure!(
+            reply["invalid"] == true,
+            "Legacy validator readiness reply is incompatible"
+        );
+        Ok(())
+    }
     pub async fn validate(&self, state: &Value) -> Result<Value> {
+        let reply = self.exchange(state).await?;
+        ensure!(reply.get("state").is_some(), "Invalid report");
+        Ok(reply["state"].clone())
+    }
+    async fn exchange(&self, state: &Value) -> Result<Value> {
         let mut guard = self.worker.lock().await;
         // A cancelled request owns and drops the worker; its unread reply cannot reach another request.
         let mut worker = match guard.take() {
@@ -68,8 +81,7 @@ impl LegacyValidator {
         match result {
             Ok(Ok(result)) => {
                 *guard = Some(worker);
-                ensure!(result.get("state").is_some(), "Invalid report");
-                Ok(result["state"].clone())
+                Ok(result)
             }
             other => {
                 let _ = worker.child.kill().await;

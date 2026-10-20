@@ -19,27 +19,80 @@ use std::collections::HashMap;
 pub struct App {
     pub store: Store,
     pub release_id: Option<String>,
+    pub release_root: Option<std::path::PathBuf>,
     pub ingestion: Option<Ingestion>,
 }
 pub fn router(app: App) -> Router {
     Router::new()
-        .route("/",get(||async{Html(include_str!("../web/index.html"))}))
-        .route("/scene.js",get(||async{([(axum::http::header::CONTENT_TYPE,"text/javascript; charset=utf-8")],include_str!("../web/scene.js"))}))
-        .route("/health",get(health))
-        .route("/api/leaderboard",get(leaderboard))
-        .route("/api/boxes/{id}",get(box_detail))
-        .route("/api/feedback",any(crate::admin::feedback))
-        .route("/api/admin",any(||async{StatusCode::NOT_FOUND}))
-        .route("/api/admin/{*path}",any(||async{StatusCode::NOT_FOUND}))
-        .route("/api/registrations",post(register))
-        .route("/api/reports",put(report))
-        .route("/api/reports/ws",get(push::upgrade))
-        .route("/api/announcements",get(push::announcements))
-        .route("/api/announcements/public",get(push::public_announcements))
-        .fallback(||async{(StatusCode::NOT_IMPLEMENTED,Json(json!({"error":"Rust migration preview: this endpoint is not implemented","accepted":false})))})
-        .layer(axum::middleware::map_response(|mut response:Response|async move{response.headers_mut().insert("cache-control","no-store".parse().unwrap());response.headers_mut().insert("x-content-type-options","nosniff".parse().unwrap());response}))
+        .route(
+            "/",
+            get(|State(app): State<App>| async move {
+                Html(crate::assets::pin_public(
+                    include_str!("../web/index.html"),
+                    app.release_id.as_deref(),
+                ))
+            }),
+        )
+        .route(
+            "/scene.js",
+            get(|| async {
+                (
+                    [(
+                        axum::http::header::CONTENT_TYPE,
+                        "text/javascript; charset=utf-8",
+                    )],
+                    include_str!("../web/scene.js"),
+                )
+            }),
+        )
+        .route("/health", get(health))
+        .route("/api/leaderboard", get(leaderboard))
+        .route("/api/boxes/{id}", get(box_detail))
+        .route("/api/feedback", any(crate::admin::feedback))
+        .route("/api/admin", any(|| async { StatusCode::NOT_FOUND }))
+        .route(
+            "/api/admin/{*path}",
+            any(|| async { StatusCode::NOT_FOUND }),
+        )
+        .route("/api/registrations", post(register))
+        .route("/api/reports", put(report))
+        .route("/api/reports/ws", get(push::upgrade))
+        .route("/api/announcements", get(push::announcements))
+        .route("/api/announcements/public", get(push::public_announcements))
+        .fallback(historical_asset)
+        .layer(axum::middleware::map_response(
+            |mut response: Response| async move {
+                if !response.headers().contains_key("cache-control") {
+                    response
+                        .headers_mut()
+                        .insert("cache-control", "no-store".parse().unwrap());
+                }
+                response
+                    .headers_mut()
+                    .insert("x-content-type-options", "nosniff".parse().unwrap());
+                response
+            },
+        ))
         .layer(DefaultBodyLimit::disable())
         .with_state(app)
+}
+async fn historical_asset(State(app): State<App>, request: Request) -> Response {
+    if request.method() != axum::http::Method::GET {
+        return error(StatusCode::NOT_FOUND, "Not found");
+    }
+    match crate::assets::historical(app.release_root, request.uri().path().to_owned(), false).await
+    {
+        Ok(Some(asset)) => (
+            [
+                ("content-type", asset.mime),
+                ("cache-control", "public, max-age=31536000, immutable"),
+            ],
+            asset.bytes,
+        )
+            .into_response(),
+        Ok(None) => error(StatusCode::NOT_FOUND, "Not found"),
+        Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "Asset read failed"),
+    }
 }
 async fn health(State(app): State<App>) -> Response {
     let controls = match database(app.store, |s| s.controls(now_ms())).await {

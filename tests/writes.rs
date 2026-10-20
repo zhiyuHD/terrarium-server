@@ -31,6 +31,7 @@ fn app(store: Store) -> Router {
         ingestion: Some(Ingestion::new(store.clone())),
         store,
         release_id: None,
+        release_root: None,
     })
 }
 async fn http(

@@ -29,6 +29,7 @@ fn application(store: Store, writes: bool) -> App {
         ingestion: writes.then(|| Ingestion::new(store.clone())),
         store,
         release_id: None,
+        release_root: None,
     }
 }
 fn private(app: App) -> Router {

@@ -1,3 +1,4 @@
+pub mod assets;
 pub mod http;
 pub mod legacy_validation;
 pub mod protocol;

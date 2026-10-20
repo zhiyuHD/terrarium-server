@@ -69,6 +69,9 @@ impl Ingestion {
             metrics: Arc::new(crate::metrics::Metrics::default()),
         }
     }
+    pub async fn ready(&self) -> anyhow::Result<()> {
+        self.validator.ready().await
+    }
     pub fn metrics(&self) -> Arc<crate::metrics::Metrics> {
         self.metrics.clone()
     }
