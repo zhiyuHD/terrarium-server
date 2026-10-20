@@ -45,7 +45,7 @@ pub fn meets_minimum(client: &Value, minimum: &Value) -> bool {
     }
     !client.contains('-')
 }
-fn stable_version(value: &Value) -> bool {
+pub(crate) fn stable_version(value: &Value) -> bool {
     value.is_null()
         || value.as_str().is_some_and(|v| {
             valid_version(value)
@@ -55,6 +55,7 @@ fn stable_version(value: &Value) -> bool {
 }
 pub(crate) fn validate_document(name: &str, value: &Value) -> Result<()> {
     match name {
+        "feedback.json" => crate::operations::validate_feedback(value)?,
         "controls.json" => {
             ensure!(
                 value.is_object()

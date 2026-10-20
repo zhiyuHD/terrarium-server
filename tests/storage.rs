@@ -31,7 +31,7 @@ fn fixture() -> (TempDir, Store) {
         ("admin-token", "fixture-admin"),
         ("controls.json", "{\"httpPush\":{\"enabled\":false}}"),
         ("announcements.json", "{\"nextId\":9,\"announcements\":[]}"),
-        ("feedback.json", "{\"nextId\":5,\"entries\":[]}"),
+        ("feedback.json", "{\"nextId\":5,\"feedback\":[]}"),
         ("protocol-notices.json", "{}"),
     ] {
         fs::write(old.join(name), bytes).unwrap();

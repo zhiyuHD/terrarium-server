@@ -8,3 +8,7 @@ pub mod policy;
 
 pub mod ingestion;
 pub mod push;
+
+pub mod admin;
+pub mod metrics;
+pub mod operations;

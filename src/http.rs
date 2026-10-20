@@ -11,7 +11,7 @@ use axum::{
     extract::{DefaultBodyLimit, Path, Query, Request, State},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Response},
-    routing::{get, post, put},
+    routing::{any, get, post, put},
 };
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -28,6 +28,9 @@ pub fn router(app: App) -> Router {
         .route("/health",get(health))
         .route("/api/leaderboard",get(leaderboard))
         .route("/api/boxes/{id}",get(box_detail))
+        .route("/api/feedback",any(crate::admin::feedback))
+        .route("/api/admin",any(||async{StatusCode::NOT_FOUND}))
+        .route("/api/admin/{*path}",any(||async{StatusCode::NOT_FOUND}))
         .route("/api/registrations",post(register))
         .route("/api/reports",put(report))
         .route("/api/reports/ws",get(push::upgrade))

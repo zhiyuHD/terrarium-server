@@ -1,7 +1,7 @@
-<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, scripts/check-client.mjs -->
+<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs -->
 # terrarium-server
 
-生态箱独立服务端，使用 Rust + SQLite 逐步迁移。生产环境仍运行 `cortico-world-terrarium` 的 TypeScript 服务端；本仓库是回环地址上的迁移预览，管理与反馈接口尚未迁移，不能替换生产入口。
+生态箱独立服务端，使用 Rust + SQLite 逐步迁移。生产环境仍运行 `cortico-world-terrarium` 的 TypeScript 服务端；本仓库仍为迁移预览，公共接口仅监听回环地址。管理和反馈接口已迁移，尚未进行生产快照与负载验证。
 
 已实现：
 
@@ -9,12 +9,15 @@
 - 自动分配 ID/token，兼容旧 ID 注册，Bearer 鉴权，HTTP 完整上报和 WS 完整/增量上报。提交上限 8 MiB，每连接最多 8 个待处理报告，WS 每 30 秒检查心跳。
 - 与 TS 一致的规范 JSON SHA-256、基线 revision/hash 和目标 hash 校验。首次连接、重连及校验失败要求完整状态；成功确认在 SQLite 事务提交后发送。
 - 最低客户端版本、HTTP Push 开关及定时生效规则，忽略提交时返回 `accepted: false`。协议升级提醒使用独立记录，保留既有通知 ID，不进入管理员公告列表；支持公开公告及鉴权公告轮询。
+- 独立私网管理端口，包含管理页面、MiSans 和 Lucide 资源；校验实际来源 IP、CIDR、Host 与 Origin，管理员 Bearer token 与普通箱子凭据分离。公共端口不提供管理接口。
+- 公告发布、撤销、定向投递；反馈提交、分页、限流和处理标记；云控立即或定时变更。公告与自动协议提醒共用事务分配游标。
+- 管理概览通过 SQL 提取箱子摘要，提供当前 WS 连接数、成功提交计数、运行时间及 Rust 主进程 RSS；不包含 Node 校验子进程内存。计数在重启后归零。
 - SQLite WAL，持久写连接、独立读连接、`synchronous=FULL`。每箱一行，比较 revision 后更新；运行时数据库操作在阻塞线程执行。
 - 旧 JSON 导入、导出、完整性检查、在线备份。导入默认预览，`--apply` 才写入，只允许导入空库。ID/token、公告游标、反馈、云控和管理员凭据保留，未知状态字段保留。
 
 状态校验和 v1/v2 存档升级暂时通过常驻 Node 子进程复用原 TS 校验器，详见 [bridge/README.md](bridge/README.md)。写入预览仍需要 Node 22+；只有读服务不启动该进程。原生 Rust 校验器覆盖全部可选字段并通过差分测试后才能移除此 fallback。
 
-默认 `serve` 禁止写入，`/health` 返回 `readOnly: true`、`websocketPush: false`。显式指定 `--enable-writes` 才开放已迁移的写入接口。管理与反馈接口返回 501，不会报告成功。预览只允许监听回环地址。
+默认 `serve` 禁止写入，`/health` 返回 `readOnly: true`、`websocketPush: false`。显式指定 `--enable-writes` 才开放已迁移的写入接口。反馈与管理写操作在只读模式返回 501。私网管理端口通过 `--admin-listen` 单独启用，只接受私有或回环 IPv4，允许网段默认是监听 IP 的 `/32`。
 
 ## 运行
 
@@ -30,27 +33,38 @@ cargo clippy --all-targets --locked -- -D warnings
 ./target/release/terrarium-server serve --database data/terrarium.sqlite --listen 127.0.0.1:8790
 # 仅在隔离数据副本上验证写入。
 ./target/release/terrarium-server serve --database data/terrarium.sqlite --listen 127.0.0.1:8790 --enable-writes
+# 可选私网管理台；端口和允许网段按部署设置。
+./target/release/terrarium-server serve --database data/terrarium.sqlite --listen 127.0.0.1:8790 --enable-writes --admin-listen 192.168.1.10:8791 --admin-cidr 192.168.1.0/24
+# 凭据存在 SQLite 中。导入的管理员凭据直接延用；写入模式启用管理监听时才自动初始化缺失凭据。
+./target/release/terrarium-server admin-token --database data/terrarium.sqlite
+# 也可显式初始化；重复执行保留原值。
+./target/release/terrarium-server admin-token --database data/terrarium.sqlite --create
 ./target/release/terrarium-server backup --database data/terrarium.sqlite --output backup.sqlite
 ./target/release/terrarium-server export-legacy --database data/terrarium.sqlite --output /path/to/new-export
 ```
 
-导出和备份要求目标不存在。未更新的旧文档逐字保留；报告或注册更新后分别重新导出排行榜或凭据，其他文档仍保留原始内容。数据库和备份包含凭据，应与生产 `data/` 一样限制权限，不进入源码仓。SIGINT/SIGTERM 停止 HTTP 服务，校验子进程随服务退出。
+导出和备份要求目标不存在。未更新的旧文档逐字保留；报告或注册更新后分别重新导出排行榜或凭据，其他文档仍保留原始内容。数据库和备份包含凭据，应与生产 `data/` 一样限制权限，不进入源码仓。SIGINT/SIGTERM 停止公共和管理 HTTP 服务，校验子进程随服务退出。
 
-`web/` 是生态箱 0.8.6 的公共页面与渲染 bundle，按 MIT 许可证保留。公告可以读取；反馈提交与管理操作尚不可用。
+`web/` 的公共页面、渲染 bundle 和 `web/admin/` 管理台来自生态箱 0.8.6 的 `server/` 与 `dist/console/`；代码按 MIT 许可证保留，字体与图标许可证位于 `web/admin/assets/`。管理台内存标签注明主进程范围。
+
+箱子与凭据按行存储；公告、反馈、云控和协议通知保留兼容 JSON 文档，更新在 SQLite 写事务中完成。公告和反馈各有 2000 条上限。此阶段保持 schema 1，不增加磁盘格式迁移。
 
 ## 兼容验证
 
-`cargo test --locked` 使用临时数据库、本地真实端口和合成状态，不访问外部服务。64 组 TS 积分样本、70 组规范 JSON hash 样本用于核对计分和校验和，另覆盖补丁路径、旧存档升级、校验进程退出或取消、鉴权、WS 重连、通知去重、计划生效、写入失败和导出备份。
+`cargo test --locked` 使用临时数据库、本地真实端口和合成状态，不访问外部服务。64 组 TS 积分样本、70 组规范 JSON hash 样本用于核对计分和校验和，另覆盖补丁路径、旧存档升级、校验进程退出或取消、鉴权、WS 重连、通知去重、计划生效、管理端口隔离、反馈容量与限流、并发通知游标、写入失败和导出备份。
 
 现有 World 客户端的人工兼容检查：在装有 `tsx` 的 Cortico 检出中执行以下命令。脚本启动临时 Rust 服务、使用合成地/水箱检查完整/增量提交、排行榜、公告、重连、凭据复用、停止与导出，不接触部署数据。
 
 ```sh
 node --import tsx /path/to/terrarium-server/scripts/check-client.mjs /path/to/Cortico/packages/cortico-world-terrarium
+node --import tsx /path/to/terrarium-server/scripts/check-admin.mjs /path/to/Cortico/packages/cortico-world-terrarium
 ```
+
+管理兼容脚本用旧 TS 管理 CLI 操作 Rust，再停止 Rust 并导出到临时目录；旧 TS 服务端在相同回环端口启动，检查状态、分数、凭据、公告、反馈与云控，并继续写入反馈和公告。所有记录均为合成数据。
 
 ## 后续迁移
 
-1. 移植管理接口、公告与反馈写入、运行指标，补齐 Native 发布包；将校验与旧存档升级移植到 Rust，移除 Node fallback。
+1. 补齐 Native 发布包及历史发布资源路由；将校验与旧存档升级移植到 Rust，移除 Node fallback。
 2. 在一致的生产快照上校验箱子、凭据、排行榜、通知游标及导出结果，再进行影子读取和负载验证。
 3. 安排停机迁移。SQLite 与旧 JSON 写入格式不同，使用新的 data epoch；迁移完成前不允许跨格式自动回滚。回滚前须停写并导出最新数据，不能仅切换旧二进制。
 

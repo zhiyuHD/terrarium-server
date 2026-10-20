@@ -90,6 +90,7 @@ async fn connection(
     version: Value,
     opt_in: bool,
 ) {
+    let _connection = ingestion.metrics().connected(&id);
     let (mut sink, mut stream) = socket.split();
     let gate = match ingestion.gate(&id, &version, "websocket").await {
         Ok(gate) => gate,
@@ -216,12 +217,27 @@ pub async fn announcements(
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e.body())).into_response(),
     }
 }
-pub async fn public_announcements(State(app): State<App>) -> Response {
-    if app.ingestion.is_none() {
-        return StatusCode::NOT_IMPLEMENTED.into_response();
-    }
+pub async fn public_announcements(
+    State(app): State<App>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Response {
+    let latest = query.get("view").is_some_and(|s| s == "latest");
+    let after = if latest {
+        0
+    } else {
+        match query.get("after").map(|v| v.parse::<u64>()).transpose() {
+            Ok(n) if n.unwrap_or(0) <= 9_007_199_254_740_991 => n.unwrap_or(0),
+            _ => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error":"Invalid announcement cursor"})),
+                )
+                    .into_response();
+            }
+        }
+    };
     match database(app.store, move |s| {
-        s.announcement_page(None, 0, true, None, now_ms())
+        s.announcement_page(None, after, latest, None, now_ms())
     })
     .await
     {

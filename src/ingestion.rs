@@ -14,6 +14,7 @@ pub struct Ingestion {
     store: Store,
     validator: LegacyValidator,
     pending: Arc<Semaphore>,
+    metrics: Arc<crate::metrics::Metrics>,
 }
 #[derive(Debug)]
 pub struct ReportError {
@@ -65,7 +66,11 @@ impl Ingestion {
             store,
             validator: LegacyValidator::default(),
             pending: Arc::new(Semaphore::new(32)),
+            metrics: Arc::new(crate::metrics::Metrics::default()),
         }
+    }
+    pub fn metrics(&self) -> Arc<crate::metrics::Metrics> {
+        self.metrics.clone()
     }
     pub async fn gate(
         &self,
@@ -207,6 +212,7 @@ impl Ingestion {
                 "Concurrent report requires resynchronization",
             ));
         }
+        self.metrics.accepted(transport);
         Ok(entry)
     }
 }
