@@ -3,22 +3,31 @@ name = "terrarium-server"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-description = "Terrarium server migration: SQLite storage and Rust read APIs"
+description = "Terrarium server migration: Rust HTTP/WS protocols and SQLite storage"
 repository = "https://github.com/zhiyuHD/terrarium-server"
 
 [dependencies]
 anyhow = "1"
-axum = "0.8"
+axum = { version = "0.8", features = ["ws"] }
 clap = { version = "4", features = ["derive", "env"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "process", "io-util", "sync", "time"] }
+
+sha2 = "0.10"
+ryu-js = "1"
+regex = "1"
+subtle = "2"
+getrandom = "0.4"
+chrono = "0.4"
+futures-util = "0.3"
 
 [dev-dependencies]
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+tokio-tungstenite = "0.29"
 
 [profile.release]
 lto = "thin"

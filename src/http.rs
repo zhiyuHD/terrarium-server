@@ -1,10 +1,17 @@
-use crate::{scoring::score_parts, store::Store};
+use crate::{
+    ingestion::{Ingestion, database, now_ms},
+    protocol::{MAX_BYTES, valid_id},
+    push,
+    scoring::score_parts,
+    store::Store,
+};
 use axum::{
     Json, Router,
-    extract::{Path, Query, State},
-    http::StatusCode,
+    body::to_bytes,
+    extract::{DefaultBodyLimit, Path, Query, Request, State},
+    http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Response},
-    routing::get,
+    routing::{get, post, put},
 };
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -12,15 +19,33 @@ use std::collections::HashMap;
 pub struct App {
     pub store: Store,
     pub release_id: Option<String>,
+    pub ingestion: Option<Ingestion>,
 }
 pub fn router(app: App) -> Router {
-    Router::new().route("/",get(||async{Html(include_str!("../web/index.html"))})).route("/scene.js",get(||async{([(axum::http::header::CONTENT_TYPE,"text/javascript; charset=utf-8")],include_str!("../web/scene.js"))})).route("/health",get(health)).route("/api/leaderboard",get(leaderboard)).route("/api/boxes/{id}",get(box_detail)).fallback(||async{(StatusCode::NOT_IMPLEMENTED,Json(json!({"error":"Rust migration preview: this endpoint is not implemented","accepted":false})))}).with_state(app)
+    Router::new()
+        .route("/",get(||async{Html(include_str!("../web/index.html"))}))
+        .route("/scene.js",get(||async{([(axum::http::header::CONTENT_TYPE,"text/javascript; charset=utf-8")],include_str!("../web/scene.js"))}))
+        .route("/health",get(health))
+        .route("/api/leaderboard",get(leaderboard))
+        .route("/api/boxes/{id}",get(box_detail))
+        .route("/api/registrations",post(register))
+        .route("/api/reports",put(report))
+        .route("/api/reports/ws",get(push::upgrade))
+        .route("/api/announcements",get(push::announcements))
+        .route("/api/announcements/public",get(push::public_announcements))
+        .fallback(||async{(StatusCode::NOT_IMPLEMENTED,Json(json!({"error":"Rust migration preview: this endpoint is not implemented","accepted":false})))})
+        .layer(axum::middleware::map_response(|mut response:Response|async move{response.headers_mut().insert("cache-control","no-store".parse().unwrap());response.headers_mut().insert("x-content-type-options","nosniff".parse().unwrap());response}))
+        .layer(DefaultBodyLimit::disable())
+        .with_state(app)
 }
-async fn health(State(app): State<App>) -> Json<Value> {
-    Json(
-        json!({"ok":true,"version":env!("CARGO_PKG_VERSION"),"releaseId":app.release_id,"implementation":"rust","readOnly":true,"websocketPush":false}),
-    )
+async fn health(State(app): State<App>) -> Response {
+    let controls = match database(app.store, |s| s.controls(now_ms())).await {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(e.body())).into_response(),
+    };
+    Json(json!({"ok":true,"version":env!("CARGO_PKG_VERSION"),"releaseId":app.release_id,"implementation":"rust","readOnly":app.ingestion.is_none(),"websocketPush":app.ingestion.is_some(),"httpPushEnabled":app.ingestion.is_some()&&controls["httpPush"]["enabled"]==true,"minimumClientVersion":controls["minimumClientVersion"]["version"]})).into_response()
 }
+
 fn error(status: StatusCode, message: &str) -> Response {
     (status, Json(json!({"error":message}))).into_response()
 }
@@ -72,5 +97,80 @@ async fn leaderboard(
         Ok(Ok(value)) => Json(value).into_response(),
         Ok(Err(_)) => error(StatusCode::BAD_REQUEST, "Invalid leaderboard request"),
         Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "Read failed"),
+    }
+}
+
+async fn register(State(app): State<App>, request: Request) -> Response {
+    if app.ingestion.is_none() {
+        return error(StatusCode::NOT_IMPLEMENTED, "Write preview is disabled");
+    }
+    let body = match to_bytes(request.into_body(), 1024).await {
+        Ok(b) => b,
+        Err(_) => return error(StatusCode::PAYLOAD_TOO_LARGE, "Registration too large"),
+    };
+    let input: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(_) => return error(StatusCode::BAD_REQUEST, "Invalid JSON"),
+    };
+    if !input.is_object()
+        || input
+            .as_object()
+            .unwrap()
+            .keys()
+            .any(|k| k != "id" && k != "kind")
+        || input
+            .get("id")
+            .is_some_and(|v| !v.as_str().is_some_and(valid_id))
+        || input
+            .get("kind")
+            .is_some_and(|v| v != "land" && v != "water")
+    {
+        return error(StatusCode::BAD_REQUEST, "Invalid registration");
+    }
+    let id = input["id"].as_str().map(str::to_owned);
+    match database(app.store, move |s| s.register(id.as_deref())).await {
+        Ok(Some(credentials)) => (StatusCode::CREATED, Json(credentials)).into_response(),
+        Ok(None) => error(
+            StatusCode::CONFLICT,
+            "Box ID is already registered; supply its token or choose another ID",
+        ),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e.body())).into_response(),
+    }
+}
+async fn report(State(app): State<App>, headers: HeaderMap, request: Request) -> Response {
+    let Some(ingestion) = app.ingestion else {
+        return error(StatusCode::NOT_IMPLEMENTED, "Write preview is disabled");
+    };
+    let body = match to_bytes(request.into_body(), MAX_BYTES).await {
+        Ok(b) => b,
+        Err(_) => return error(StatusCode::PAYLOAD_TOO_LARGE, "Report too large"),
+    };
+    let input: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(_) => return error(StatusCode::BAD_REQUEST, "Invalid JSON"),
+    };
+    let Some(id) = input["id"]
+        .as_str()
+        .filter(|s| valid_id(s))
+        .map(str::to_owned)
+    else {
+        return error(StatusCode::BAD_REQUEST, "Invalid report");
+    };
+    let token = push::bearer(&headers);
+    let auth_id = id.clone();
+    match database(app.store, move |s| s.authenticated(&auth_id, &token)).await {
+        Ok(true) => {}
+        Ok(false) => return error(StatusCode::UNAUTHORIZED, "Unauthorized"),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(e.body())).into_response(),
+    }
+    let mut report = json!({"state":input["state"]});
+    for key in ["phase", "clientVersion", "coopanionVersion"] {
+        if let Some(value) = input.get(key) {
+            report[key] = value.clone();
+        }
+    }
+    match ingestion.commit(&id, &report, "http").await {
+        Ok(entry) => Json(json!({"score":entry["score"]})).into_response(),
+        Err(e) => (StatusCode::from_u16(e.status).unwrap(), Json(e.body())).into_response(),
     }
 }

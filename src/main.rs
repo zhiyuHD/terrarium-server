@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 use std::{net::SocketAddr, path::PathBuf};
 use terrarium_server::{
     http::{App, router},
+    ingestion::Ingestion,
     store::{LegacySnapshot, Store},
 };
 #[derive(Parser)]
@@ -38,7 +39,7 @@ enum Command {
         #[arg(long)]
         database: PathBuf,
     },
-    /// Read-only migration preview. Public write endpoints are not enabled.
+    /// Loopback migration preview; writes require explicit opt-in.
     Serve {
         #[arg(
             long,
@@ -48,6 +49,8 @@ enum Command {
         database: PathBuf,
         #[arg(long, default_value = "127.0.0.1:8790")]
         listen: SocketAddr,
+        #[arg(long)]
+        enable_writes: bool,
     },
 }
 #[tokio::main]
@@ -80,7 +83,11 @@ async fn main() -> Result<()> {
             Store::existing(database)?.check()?;
             println!("ok");
         }
-        Command::Serve { database, listen } => {
+        Command::Serve {
+            database,
+            listen,
+            enable_writes,
+        } => {
             anyhow::ensure!(
                 listen.ip().is_loopback(),
                 "Migration preview must bind to loopback"
@@ -90,19 +97,37 @@ async fn main() -> Result<()> {
             let listener = tokio::net::TcpListener::bind(listen)
                 .await
                 .context("Listen failed")?;
-            println!("Read-only Rust preview on {}", listener.local_addr()?);
+            println!(
+                "Rust preview on {} (writes: {})",
+                listener.local_addr()?,
+                enable_writes
+            );
+            let ingestion = enable_writes.then(|| Ingestion::new(store.clone()));
             axum::serve(
                 listener,
                 router(App {
                     store,
+                    ingestion,
                     release_id: std::env::var("CORTICO_TERRARIUM_RELEASE_ID").ok(),
                 }),
             )
             .with_graceful_shutdown(async {
-                let _ = tokio::signal::ctrl_c().await;
+                shutdown_signal().await;
             })
             .await?;
         }
     }
     Ok(())
+}
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("SIGTERM handler");
+        tokio::select! { _=tokio::signal::ctrl_c()=>{},_=terminate.recv()=>{} }
+    }
+    #[cfg(not(unix))]
+    let _ = tokio::signal::ctrl_c().await;
 }

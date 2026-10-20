@@ -1,0 +1,266 @@
+{
+  "land": {
+    "version": 3,
+    "soil": [
+      {
+        "x": 0,
+        "y": 0,
+        "moisture": 45
+      },
+      {
+        "x": 1,
+        "y": 0,
+        "moisture": 50
+      },
+      {
+        "x": 2,
+        "y": 0,
+        "moisture": 50
+      },
+      {
+        "x": 3,
+        "y": 0,
+        "moisture": 50
+      },
+      {
+        "x": 4,
+        "y": 0,
+        "moisture": 50
+      },
+      {
+        "x": 0,
+        "y": 1,
+        "moisture": 50
+      },
+      {
+        "x": 1,
+        "y": 1,
+        "moisture": 50
+      },
+      {
+        "x": 2,
+        "y": 1,
+        "moisture": 50
+      },
+      {
+        "x": 3,
+        "y": 1,
+        "moisture": 50
+      },
+      {
+        "x": 4,
+        "y": 1,
+        "moisture": 50
+      },
+      {
+        "x": 0,
+        "y": 2,
+        "moisture": 50
+      },
+      {
+        "x": 1,
+        "y": 2,
+        "moisture": 50
+      },
+      {
+        "x": 2,
+        "y": 2,
+        "moisture": 50
+      },
+      {
+        "x": 3,
+        "y": 2,
+        "moisture": 50
+      },
+      {
+        "x": 4,
+        "y": 2,
+        "moisture": 50
+      },
+      {
+        "x": 0,
+        "y": 3,
+        "moisture": 50
+      },
+      {
+        "x": 1,
+        "y": 3,
+        "moisture": 50
+      },
+      {
+        "x": 2,
+        "y": 3,
+        "moisture": 50
+      },
+      {
+        "x": 3,
+        "y": 3,
+        "moisture": 50
+      },
+      {
+        "x": 4,
+        "y": 3,
+        "moisture": 50
+      },
+      {
+        "x": 0,
+        "y": 4,
+        "moisture": 50
+      },
+      {
+        "x": 1,
+        "y": 4,
+        "moisture": 50
+      },
+      {
+        "x": 2,
+        "y": 4,
+        "moisture": 50
+      },
+      {
+        "x": 3,
+        "y": 4,
+        "moisture": 50
+      },
+      {
+        "x": 4,
+        "y": 4,
+        "moisture": 50
+      }
+    ],
+    "history": [
+      {
+        "recordedAtMs": 1792454400000,
+        "gridSize": 5,
+        "score": 20,
+        "scoreVersion": 2,
+        "soilMoisture": [
+          45,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50
+        ],
+        "plants": [
+          {
+            "id": "fern",
+            "species": "fern",
+            "moisture": 45,
+            "health": 100,
+            "stage": 0,
+            "growthHours": 0
+          },
+          {
+            "id": "clover",
+            "species": "clover",
+            "moisture": 50,
+            "health": 100,
+            "stage": 0,
+            "growthHours": 0
+          }
+        ]
+      }
+    ],
+    "updatedAtMs": 1792454400000,
+    "nextId": 1,
+    "plants": [
+      {
+        "id": "fern",
+        "species": "fern",
+        "x": 0,
+        "y": 0,
+        "moisture": 45,
+        "growthHours": 0,
+        "stage": 0,
+        "dry": false,
+        "health": 100
+      },
+      {
+        "id": "clover",
+        "species": "clover",
+        "x": 4,
+        "y": 0,
+        "moisture": 50,
+        "growthHours": 0,
+        "stage": 0,
+        "dry": false,
+        "health": 100
+      }
+    ],
+    "seeds": [],
+    "bugs": [],
+    "items": [
+      {
+        "id": "coin",
+        "x": 1,
+        "y": 1
+      },
+      {
+        "id": "pebble",
+        "x": 2,
+        "y": 1
+      }
+    ]
+  },
+  "water": {
+    "version": 1,
+    "kind": "water",
+    "updatedAtMs": 1792454400000,
+    "nextId": 3,
+    "oxygen": 80,
+    "cleanliness": 100,
+    "fish": [],
+    "plants": [
+      {
+        "id": "aquatic-1",
+        "species": "waterweed",
+        "x": 0,
+        "y": 0,
+        "health": 100,
+        "growthHours": 0,
+        "stage": 0
+      },
+      {
+        "id": "aquatic-2",
+        "species": "algae",
+        "x": 4,
+        "y": 0,
+        "health": 100,
+        "growthHours": 0,
+        "stage": 0
+      }
+    ],
+    "food": [],
+    "history": [
+      {
+        "recordedAtMs": 1792454400000,
+        "score": 20,
+        "scoreVersion": 2,
+        "oxygen": 80,
+        "cleanliness": 100,
+        "fish": []
+      }
+    ],
+    "replays": []
+  }
+}

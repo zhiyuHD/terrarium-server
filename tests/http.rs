@@ -48,6 +48,7 @@ async fn serves_global_pagination_search_summary_replays_and_rejects_writes() {
     let app = router(App {
         store,
         release_id: Some("fixture".into()),
+        ingestion: None,
     });
     let (status, page) = query(app.clone(), "/api/leaderboard?kind=land&view=gallery").await;
     assert_eq!(status, StatusCode::OK);

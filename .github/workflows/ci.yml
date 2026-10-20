@@ -8,6 +8,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - run: cargo fmt --check
       - run: cargo test --locked
       - run: cargo clippy --all-targets --locked -- -D warnings

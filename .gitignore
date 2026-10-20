@@ -3,3 +3,5 @@
 /data/
 *.sqlite*
 .env
+
+/bridge/node_modules/

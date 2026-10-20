@@ -42,8 +42,9 @@ impl LegacySnapshot {
                     );
                     let bytes = fs::read(path)?;
                     if name.ends_with(".json") {
-                        serde_json::from_slice::<Value>(&bytes)
+                        let value = serde_json::from_slice::<Value>(&bytes)
                             .with_context(|| format!("Invalid JSON in {name}"))?;
+                        crate::policy::validate_document(name, &value)?;
                     }
                     documents.insert((*name).to_owned(), bytes);
                 }
@@ -84,7 +85,7 @@ impl LegacySnapshot {
         )
     }
 }
-fn valid_id(id: &str) -> bool {
+pub fn valid_id(id: &str) -> bool {
     let b = id.as_bytes();
     (2..=40).contains(&b.len())
         && b[0].is_ascii_alphanumeric()
@@ -157,6 +158,51 @@ impl Store {
         let conn = Connection::open_with_flags(&self.path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         conn.busy_timeout(Duration::from_secs(5))?;
         Ok(conn)
+    }
+    pub(crate) fn transaction<T>(
+        &self,
+        work: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<T>,
+    ) -> Result<T> {
+        let mut conn = self.writer()?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let value = work(&tx)?;
+        tx.commit()?;
+        Ok(value)
+    }
+    pub fn authenticated(&self, id: &str, token: &str) -> Result<bool> {
+        use sha2::{Digest, Sha256};
+        use subtle::ConstantTimeEq;
+        let expected: Option<String> = self
+            .reader()?
+            .query_row("SELECT token FROM credentials WHERE id=?1", [id], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        let actual = Sha256::digest(token.as_bytes());
+        let hash = Sha256::digest(expected.as_deref().unwrap_or("").as_bytes());
+        Ok(bool::from(actual.ct_eq(&hash)) && expected.is_some())
+    }
+    pub fn register(&self, requested: Option<&str>) -> Result<Option<Value>> {
+        self.transaction(|tx|{let id=requested.map(str::to_owned).unwrap_or_else(||format!("box-{}",random_hex(12)));let count:i64=tx.query_row("SELECT (SELECT count(*) FROM credentials WHERE id=?1)+(SELECT count(*) FROM boxes WHERE id=?1)",[&id],|r|r.get(0))?;if count>0{return Ok(None);}let token=random_hex(32);tx.execute("INSERT INTO credentials VALUES(?1,?2)",params![id,token])?;tx.execute("DELETE FROM legacy_documents WHERE name='credentials.json'",[])?;Ok(Some(serde_json::json!({"id":id,"token":token})))})
+    }
+    pub fn commit_entry(&self, entry: &Value, previous: Option<&Value>) -> Result<bool> {
+        let id = entry["id"].as_str().context("Invalid ID")?;
+        validate_entry(id, entry)?;
+        self.transaction(|tx| {
+            let current: Option<Option<String>> = tx
+                .query_row("SELECT revision FROM boxes WHERE id=?1", [id], |r| r.get(0))
+                .optional()?;
+            let expected = previous.map(|e| e["reportRevision"].as_str().map(str::to_owned));
+            if current != expected {
+                return Ok(false);
+            }
+            insert_entry(tx, id, entry)?;
+            tx.execute(
+                "DELETE FROM legacy_documents WHERE name='leaderboard.json'",
+                [],
+            )?;
+            Ok(true)
+        })
     }
     pub fn import(&self, snapshot: LegacySnapshot) -> Result<()> {
         let mut conn = self.writer()?;
@@ -300,6 +346,13 @@ impl Store {
                     .collect::<Result<_>>()?;
                 docs.insert("leaderboard.json".into(), serde_json::to_vec(&boxes)?);
             }
+            if !docs.contains_key("credentials.json") {
+                let credentials: BTreeMap<String, String> = tx
+                    .prepare("SELECT id,token FROM credentials")?
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                    .collect::<rusqlite::Result<_>>()?;
+                docs.insert("credentials.json".into(), serde_json::to_vec(&credentials)?);
+            }
             for (name, bytes) in docs {
                 fs::write(stage.join(name), bytes)?;
             }
@@ -364,5 +417,31 @@ fn insert_entry(conn: &Connection, id: &str, entry: &Value) -> Result<()> {
         .context("Missing animals")?
         .len();
     conn.execute("INSERT INTO boxes VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,score=excluded.score,reported_at=excluded.reported_at,revision=excluded.revision,entry=excluded.entry,id_sort=excluded.id_sort,search=excluded.search,plants=excluded.plants,animals=excluded.animals",params![id,entry.get("kind").and_then(Value::as_str).unwrap_or("land"),score(state)?,entry["reportedAt"].as_str(),entry["reportRevision"].as_str(),serde_json::to_string(entry)?,id_sort,search,plants as i64,animals as i64])?;
+    Ok(())
+}
+
+pub fn random_hex(bytes: usize) -> String {
+    let mut data = vec![0; bytes];
+    getrandom::fill(&mut data).expect("OS random source failed");
+    data.iter().map(|b| format!("{b:02x}")).collect()
+}
+pub(crate) fn document(conn: &Connection, name: &str) -> Result<Option<Value>> {
+    let bytes: Option<Vec<u8>> = conn
+        .query_row(
+            "SELECT content FROM legacy_documents WHERE name=?1",
+            [name],
+            |r| r.get(0),
+        )
+        .optional()?;
+    bytes
+        .map(|b| {
+            let value = serde_json::from_slice(&b)?;
+            crate::policy::validate_document(name, &value)?;
+            Ok(value)
+        })
+        .transpose()
+}
+pub(crate) fn save_document(conn: &Connection, name: &str, value: &Value) -> Result<()> {
+    conn.execute("INSERT INTO legacy_documents VALUES(?1,?2) ON CONFLICT(name) DO UPDATE SET content=excluded.content",params![name,serde_json::to_vec(value)?])?;
     Ok(())
 }

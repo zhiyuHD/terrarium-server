@@ -1,0 +1,46 @@
+{
+  "before": {
+    "a/b": {
+      "~": [
+        1,
+        2,
+        3
+      ]
+    },
+    "old": true
+  },
+  "after": {
+    "a/b": {
+      "~": [
+        4,
+        5
+      ]
+    },
+    "added": "水"
+  },
+  "changes": [
+    {
+      "op": "remove",
+      "path": "/old"
+    },
+    {
+      "op": "replace",
+      "path": "/a~1b/~0/0",
+      "value": 4
+    },
+    {
+      "op": "replace",
+      "path": "/a~1b/~0/1",
+      "value": 5
+    },
+    {
+      "op": "remove",
+      "path": "/a~1b/~0/2"
+    },
+    {
+      "op": "add",
+      "path": "/added",
+      "value": "水"
+    }
+  ]
+}
