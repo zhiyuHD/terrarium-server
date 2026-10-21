@@ -115,3 +115,5 @@ node scripts/check-snapshot.mjs /path/to/legacy/server.mjs /path/to/isolated-sna
 达成时，状态提交、定向公告和一次性完成记录共用主库事务。失败或并发冲突不会提前发信；重启、重复上传、移除重种和公告过期后均不再触发。公告满额时照常接受上报，下次提交重试剧情投递。未参与、水箱及关闭状态不触发，不改变积分、解锁或模拟。
 
 配置与完成记录存为现有 `legacy_documents` 中的可选 `story.json`，不修改 SQLite schema 或 data epoch。主库在线备份和 JSON 导入/导出包含该文件；论坛回帖仍需另行 `backup-forum`。旧服务端会保留未知文档，TS 回滚时保留导出的 story.json，迁回 Rust 时重新导入。已有完成记录后不能切换主题，避免重复投递。
+
+`src/ingestion.rs` rejects snapshots over 31 days old or over 60 seconds in the future. Time errors include `stateUpdatedAtMs` and `serverAtMs`; these are separate from the 409 stale-report check against the previous accepted snapshot. Land and water use the same `/api/reports/ws` handler.

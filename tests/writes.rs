@@ -170,12 +170,17 @@ async fn http_registration_authentication_full_reports_bounds_and_restart_export
     for timestamp in [now_ms() + 120_000, now_ms() - 32 * 86_400_000] {
         let mut invalid = input.clone();
         invalid["state"]["updatedAtMs"] = json!(timestamp);
-        assert_eq!(
-            http(api.clone(), "PUT", "/api/reports", invalid, Some(token))
-                .await
-                .0,
-            StatusCode::BAD_REQUEST
+        invalid["state"]["history"] = json!([]);
+        let (status, rejection) =
+            http(api.clone(), "PUT", "/api/reports", invalid, Some(token)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let message = rejection["error"].as_str().unwrap();
+        assert!(
+            message.contains(&format!("stateUpdatedAtMs={timestamp}")),
+            "{message}"
         );
+        assert!(message.contains("serverAtMs="));
+        assert!(message.contains("future offset <= 60000 ms"));
     }
     let invalid = json!({"id":id,"state":fixture("land")});
     assert_eq!(

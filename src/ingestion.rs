@@ -189,7 +189,12 @@ impl Ingestion {
             .as_f64()
             .ok_or_else(|| ReportError::new(400, "Invalid report time"))?;
         if updated > (now + 60_000) as f64 || updated < (now - 31 * 86_400_000) as f64 {
-            return Err(ReportError::new(400, "Invalid report time"));
+            return Err(ReportError::new(
+                400,
+                format!(
+                    "Invalid report time: stateUpdatedAtMs={updated}, serverAtMs={now}; allowed age <= 31 days and future offset <= 60000 ms"
+                ),
+            ));
         }
         let kind = if state.get("fish").is_some() {
             "water"
