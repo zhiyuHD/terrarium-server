@@ -363,8 +363,9 @@ pub async fn feedback(State(app): State<App>, request: Request) -> Response {
         let box_id = if input.get("id").is_some() || authorization {
             let id = input["id"].as_str().unwrap_or("").to_owned();
             let auth_id = id.clone();
+            let auth_token = token.clone();
             if !operation(app.store.clone(), move |s| {
-                s.authenticated(&auth_id, &token)
+                s.authenticated(&auth_id, &auth_token)
             })
             .await?
             {
@@ -375,7 +376,11 @@ pub async fn feedback(State(app): State<App>, request: Request) -> Response {
             None
         };
         let receipt = operation(app.store, move |s| {
-            s.submit_feedback(&input, box_id.as_deref(), now_ms())
+            if crate::forum_bridge::is_command(&input) {
+                crate::forum_bridge::submit(&s, &input, box_id.as_deref(), &token, now_ms())
+            } else {
+                s.submit_feedback(&input, box_id.as_deref(), now_ms())
+            }
         })
         .await?;
         Ok::<_, OperationError>((StatusCode::CREATED, Json(receipt)).into_response())

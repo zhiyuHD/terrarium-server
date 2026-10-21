@@ -15,6 +15,7 @@ pub mod metrics;
 pub mod operations;
 
 pub mod forum;
+pub mod forum_bridge;
 
 pub mod presentation;
 

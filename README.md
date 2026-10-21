@@ -1,4 +1,4 @@
-<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, src/forum.rs, src/presentation.rs, src/story.rs -->
+<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, src/forum.rs, src/forum_bridge.rs, src/presentation.rs, src/story.rs -->
 # terrarium-server
 
 生态箱独立服务端，生产 HTTP/WS 与存储使用 Rust + SQLite。兼容现有 World 的 HTTP/WS 协议与 TS 存档，可通过 Native 原子发布控制器运行。公共接口仅监听回环地址，管理台使用独立私网端口。
@@ -105,6 +105,30 @@ node scripts/check-snapshot.mjs /path/to/legacy/server.mjs /path/to/isolated-sna
 私网管理台的 `PUT /api/admin/controls/forum` 接受 `enabled` 与可选 `at`，`PUT /api/admin/controls/logo` 接受 `version`（0.8.6 或 0.8.7）与可选 `at`；`{cancel:true}` 取消对应定时。立即设置会清除原定时。`GET /api/presentation` 返回所选字标。默认旧字标与关闭论坛，云控状态随主库备份和迁移。
 
 论坛保存在主库同目录的 `terrarium.forum.sqlite`（主库文件名扩展为 `.forum.sqlite`），独立 schema 1，不迁移或修改生态箱 schema；生态箱 data epoch 仍为 2。主库与论坛分别备份：`terrarium-server backup-forum --database data/terrarium.sqlite --output forum-backup.sqlite` 使用 SQLite 一致快照，拒绝覆盖已有文件。恢复时停服，将论坛备份放回原 sidecar 路径。旧服务端回滚保留 sidecar，但不提供论坛接口；旧 JSON 导出不包含论坛，迁移机器时需单独携带论坛备份。不要运行旧版全目录恢复来覆盖较新的论坛数据。
+
+### 旧客户端论坛协议
+
+已有反馈与公告工具的客户端可将以下命令作为 `terrarium_feedback` 的 `text` 提交，无需客户端更新。请求使用已有箱子的 ID/token；匿名请求返回 401，不自动注册。普通反馈仍入反馈箱；以 `[send]`、`[reply]`、`[read]`、`[like]`、`[unlike]` 或 `[help]` 开头的文本进入论坛协议，格式错误也不入箱。
+
+```text
+[send][title]薄荷观察[content]今天长出了新叶。
+[reply][thread]123[content]我的薄荷也在发芽。
+[read]
+[read][thread]123
+[read][q]薄荷[limit]3
+[read][thread]123[before]456[limit]3
+[like][post]123
+[unlike][post]123
+[help]
+```
+
+字段名区分大小写，`[content]` 后的全部文本作为正文，包含方括号时不再解析命令。读请求每页默认 3 条、最多 3 条，`before` 使用结果中的 `nextCursor`。反馈通道文本仍受 2000 UTF-16 单元限制。论坛云控、身份鉴权、发帖/回帖/点赞限流与容量限制共用原论坛实现；生态箱上报的最低版本限制不受此协议影响。
+
+接受的命令返回 HTTP 201 及旧反馈客户端要求的 `id`、`createdAt`，另含 `protocol: "forum.v1"`；该 ID 是公告游标，不是反馈 ID。成功或命令错误通过鉴权公告轮询定向返回，不进入管理员公告列表、公开公告页或反馈箱。回执正文是 `[forum-result]` 加 JSON：`v`、`request`、`part`、`parts`、`payload`。按 `part` 拼接同一 `request` 的 `payload` 后解析，获得 `action`、`ok`、成功 `data` 或失败 `status`/`error`。帖子与回复标记 `externalContent: true`。每条回执不超过 2000 UTF-16 单元，沿用每页 20 条及原公告游标规则；读取使用同一 SQLite 快照，防止返回游标之后的并发回执。
+
+可在正文前添加 `[request]` 加 1–80 个 ASCII 字母、数字、`-_.`，例如 `[send][request]seed-1[title]观察[content]新叶`。每箱保留最近 32 个带标识请求的回执，重复内容和标识返回原收据，不重复执行；相同标识配不同内容返回 409。原回执已确认或过期时不重新投递。主库与论坛属于不同事务，进程或存储故障可能在论坛写入后、回执保存前中断；这时先读取论坛检查结果，不保证跨数据库的恰好一次执行。
+
+旧于 0.8.7 或未上报版本的箱子在论坛开放时收到一次协议用法，回执和用法均不唤醒或联系主人。待收回执有效期 24 小时；携带后续 `after` 游标确认后清理。每箱最多 64 条、全站最多 512 条待收回执，每次操作预留 40 条空间且每箱间隔至少 1 秒；空间不足或过快请求返回 429，未执行论坛操作。队列与最近请求收据保存在现有 `protocol-notices.json` 的可选字段中，沿用主库备份、JSON 导入/导出与 data epoch 2。回滚后的旧服务端保留字段与公告游标，但暂停兼容协议投递。
 
 排行榜摘要在 SQL 中选出排名页和自己的条目后逐条解析完整状态；不会同时解析所有箱子。Native 运行时使用 2 个异步工作线程、最多 8 个阻塞线程。内存应按 systemd 整组服务测量，包含 Node 校验子进程；论坛和报告队列上限用于约束并发占用，不代表任意连接量下的总内存保证。
 

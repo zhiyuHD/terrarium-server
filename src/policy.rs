@@ -170,6 +170,7 @@ pub(crate) fn validate_document(name: &str, value: &Value) -> Result<()> {
                         "Invalid protocol notice identity"
                     );
                 }
+                crate::forum_bridge::validate(client)?;
             }
         }
         _ => {}
@@ -374,7 +375,8 @@ impl Store {
         notice: Option<Value>,
         now: i64,
     ) -> Result<Value> {
-        let conn = self.reader()?;
+        let mut reader = self.reader()?;
+        let conn = reader.transaction()?;
         let data = document(&conn, "announcements.json")?
             .unwrap_or_else(|| json!({"nextId":1,"announcements":[]}));
         let mut visible: Vec<_> = data["announcements"]
@@ -395,6 +397,9 @@ impl Store {
             .collect();
         if let Some(notice) = notice.filter(|n| n["id"].as_u64().unwrap_or(0) > after) {
             visible.push(notice);
+        }
+        if let Some(id) = id {
+            visible.extend(crate::forum_bridge::notices(&conn, id, after, now)?);
         }
         visible.sort_by_key(|n| n["id"].as_u64().unwrap_or(0));
         let cursor = data["nextId"].as_u64().unwrap() - 1;

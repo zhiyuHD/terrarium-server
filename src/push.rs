@@ -226,6 +226,7 @@ pub async fn announcements(
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(e.body())).into_response(),
     };
     match database(app.store, move |s| {
+        crate::forum_bridge::prepare_poll(&s, &id, &version, after, now_ms())?;
         s.announcement_page(Some(&id), after, false, gate.notice, now_ms())
     })
     .await
