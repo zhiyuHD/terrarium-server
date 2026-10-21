@@ -223,3 +223,264 @@ fn configuration_requires_a_real_root_and_cannot_retarget_after_delivery() {
         false
     );
 }
+
+fn submit(s: &Store, e: &Value) -> anyhow::Result<bool> {
+    let previous = s.get(e["id"].as_str().unwrap())?;
+    s.commit_entry(e, previous.as_ref())
+}
+fn granary_entry(id: &str) -> Value {
+    let mut e = entry(id, "land");
+    e["state"]["nests"] = json!([{"id":"nest-1","x":2,"y":2,"depth":5,"food":3}]);
+    e["state"]["bugs"] = json!([{"id":"ant-1","species":"ant","x":2,"y":2,"ageHours":1,"energy":60,"hunger":0,"role":"queen","inside":{"nestId":"nest-1","x":1,"y":1}}]);
+    e
+}
+fn next_thread(s: &Store, token: &str) -> i64 {
+    let p = forum::execute(s,&Method::POST,"threads",&HashMap::new(),&json!({"id":"story-author","title":"The granary","body":"An optional continuation","clientVersion":"0.8.7"}),token,now_ms()+60001).unwrap();
+    let root = p["id"].as_i64().unwrap();
+    s.update_granary_story(&json!({"enabled":true,"threadId":root}))
+        .unwrap();
+    root
+}
+#[test]
+fn granary_requires_prior_window_delivery_and_a_separate_opt_in_report() {
+    let (_dir, s, token, window) = fixture();
+    configure(&s, window);
+    let granary = next_thread(&s, &token);
+    participate(&s, granary, "garden-first");
+    let mut e = granary_entry("garden-first");
+    assert!(submit(&s, &e).unwrap());
+    assert!(notices(&s).is_empty());
+    participate(&s, window, "garden-first");
+    e["reportRevision"] = json!("window");
+    assert!(submit(&s, &e).unwrap());
+    assert_eq!(notices(&s).len(), 1);
+    assert_eq!(s.granary_story_status().unwrap()["completedBoxes"], 0);
+    // The plant may be collected after the first milestone; the saved delivery is the prerequisite.
+    e["state"]["plants"] = json!([]);
+    e["reportRevision"] = json!("granary");
+    assert!(submit(&s, &e).unwrap());
+    let sent = notices(&s);
+    assert_eq!(sent.len(), 2);
+    assert_eq!(sent[1]["targets"], json!(["garden-first"]));
+    assert_eq!(
+        sent[1]["id"].as_u64(),
+        sent[0]["id"].as_u64().map(|n| n + 1)
+    );
+    assert_eq!(s.granary_story_status().unwrap()["completedBoxes"], 0);
+    assert_eq!(
+        s.granary_story_status().unwrap()["progressCounts"],
+        json!([1, 0, 0, 0])
+    );
+}
+#[test]
+fn granary_checks_food_and_ant_in_the_same_nest_and_retries_after_write_failure() {
+    let (dir, s, token, window) = fixture();
+    configure(&s, window);
+    participate(&s, window, "garden-first");
+    s.commit_entry(&entry("garden-first", "land"), None)
+        .unwrap();
+    let granary = next_thread(&s, &token);
+    let e = granary_entry("garden-first");
+    submit(&s, &e).unwrap();
+    assert_eq!(notices(&s).len(), 1);
+    participate(&s, granary, "garden-first");
+    for (i, mut bad) in (0..7).map(|i| (i, e.clone())) {
+        match i {
+            0 => bad["state"]["nests"][0]["food"] = json!(2),
+            1 => bad["state"]["bugs"][0]["inside"]["nestId"] = json!("other-nest"),
+            2 => bad["state"]["bugs"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove("inside")
+                .map(|_| ())
+                .unwrap(),
+            3 => bad["state"]["bugs"][0]["energy"] = json!(0),
+            4 => bad["state"]["bugs"][0]["hunger"] = json!(100),
+            5 => bad["state"]["updatedAtMs"] = json!(0),
+            _ => bad = entry("garden-first", "water"),
+        }
+        bad["reportRevision"] = json!(format!("ineligible-{i}"));
+        submit(&s, &bad).unwrap();
+        assert_eq!(notices(&s).len(), 1);
+    }
+    s.update_granary_story(&json!({"enabled":false})).unwrap();
+    let mut ready = e.clone();
+    ready["reportRevision"] = json!("disabled");
+    submit(&s, &ready).unwrap();
+    assert_eq!(notices(&s).len(), 1);
+    s.update_granary_story(&json!({"enabled":true})).unwrap();
+    let conn = Connection::open(dir.path().join("data.sqlite")).unwrap();
+    conn.execute_batch("CREATE TRIGGER fail_granary BEFORE INSERT ON legacy_documents WHEN new.name='story-granary.json' BEGIN SELECT RAISE(ABORT,'granary write failed'); END;").unwrap();
+    ready["reportRevision"] = json!("retry");
+    assert!(submit(&s, &ready).is_err());
+    assert_eq!(
+        s.get("garden-first").unwrap().unwrap()["reportRevision"],
+        json!("disabled")
+    );
+    assert_eq!(notices(&s).len(), 1);
+    conn.execute_batch("DROP TRIGGER fail_granary;").unwrap();
+    assert!(submit(&s, &ready).unwrap());
+    assert_eq!(notices(&s).len(), 2);
+}
+#[test]
+fn granary_completion_survives_restart_export_and_notice_revocation() {
+    let (dir, s, token, window) = fixture();
+    configure(&s, window);
+    let granary = next_thread(&s, &token);
+    for root in [window, granary] {
+        participate(&s, root, "garden-first");
+    }
+    let mut e = granary_entry("garden-first");
+    submit(&s, &e).unwrap();
+    e["reportRevision"] = json!("next");
+    submit(&s, &e).unwrap();
+    let output = dir.path().join("export");
+    s.export(&output).unwrap();
+    assert!(output.join("story-granary.json").is_file());
+    let restored = Store::open(dir.path().join("imported.sqlite")).unwrap();
+    restored
+        .import(LegacySnapshot::read(&output).unwrap())
+        .unwrap();
+    assert_eq!(
+        restored.granary_story_status().unwrap(),
+        s.granary_story_status().unwrap()
+    );
+    let reopened = Store::existing(dir.path().join("data.sqlite")).unwrap();
+    assert_eq!(
+        reopened.granary_story_status().unwrap(),
+        s.granary_story_status().unwrap()
+    );
+    assert!(
+        reopened
+            .update_granary_story(&json!({"threadId":window}))
+            .is_err()
+    );
+    for n in notices(&reopened) {
+        reopened
+            .revoke_announcement(n["id"].as_u64().unwrap())
+            .unwrap();
+    }
+    e["reportRevision"] = json!("again");
+    submit(&reopened, &e).unwrap();
+    assert!(notices(&reopened).is_empty());
+}
+
+fn nursery(e: &mut Value) {
+    e["state"]["eggs"] = json!([{"id":"egg-1","species":"ant","x":2,"y":2,"laidAtMs":now_ms()-1000,"hatchesAtMs":now_ms()+3600000,"inside":{"nestId":"nest-1","x":2,"y":2}}]);
+}
+fn advance(s: &Store, e: &mut Value, revision: &str) {
+    e["reportRevision"] = json!(revision);
+    e["state"]["updatedAtMs"] = json!(now_ms());
+    assert!(submit(s, e).unwrap());
+}
+fn reply(s: &Store, root: i64, author: &str, body: &str) {
+    forum::open(s)
+        .unwrap()
+        .execute(
+            "INSERT INTO posts(thread,author,title,body,created) VALUES(?1,?2,'',?3,?4)",
+            params![root, author, body, now_ms()],
+        )
+        .unwrap();
+}
+#[test]
+fn investigation_pages_unlock_in_order_and_only_a_new_answer_from_the_same_box_finishes() {
+    let (_dir, s, token, window) = fixture();
+    configure(&s, window);
+    let root = next_thread(&s, &token);
+    participate(&s, window, "garden-first");
+    participate(&s, root, "garden-first");
+    let mut e = granary_entry("garden-first");
+    nursery(&mut e);
+    e["state"]["nests"][0]["size"] = json!(5);
+    e["state"]["nests"][0]["entrances"] = json!([{"x":3,"y":2}]);
+    reply(&s, root, "garden-first", "[续记]北窗仍在观察");
+    advance(&s, &mut e, "window");
+    advance(&s, &mut e, "granary");
+    assert_eq!(notices(&s).len(), 2);
+    advance(&s, &mut e, "nursery");
+    assert_eq!(notices(&s).len(), 3);
+    advance(&s, &mut e, "door");
+    assert_eq!(notices(&s).len(), 4);
+    advance(&s, &mut e, "old-answer-does-not-count");
+    assert_eq!(notices(&s).len(), 4);
+    reply(&s, root, "garden-second", "[续记]北窗仍在观察");
+    reply(&s, root, "garden-first", "[续记]猜错了");
+    advance(&s, &mut e, "other-and-wrong-answer");
+    assert_eq!(notices(&s).len(), 4);
+    reply(&s, root, "garden-first", "我读到的是：[续记]北窗仍在观察");
+    let conn = s.reader().unwrap();
+    let cursor: Value = serde_json::from_str(&conn.query_row("SELECT CAST(content AS TEXT) FROM legacy_documents WHERE name='story-granary.json'",[],|r|r.get::<_,String>(0)).unwrap()).unwrap();
+    let after = cursor["deliveries"]["garden-first"]["completedAt"]
+        .as_str()
+        .unwrap();
+    e["state"]["updatedAtMs"] = json!(terrarium_server::policy::at(&json!(after)).unwrap() - 1);
+    e["reportRevision"] = json!("stale-answer-report");
+    submit(&s, &e).unwrap();
+    assert_eq!(notices(&s).len(), 4);
+    advance(&s, &mut e, "answer");
+    let sent = notices(&s);
+    assert_eq!(sent.len(), 5);
+    assert_eq!(
+        s.granary_story_status().unwrap()["progressCounts"],
+        json!([1, 1, 1, 1])
+    );
+    assert_eq!(s.granary_story_status().unwrap()["completedBoxes"], 1);
+    let code: String = sent[1..4]
+        .iter()
+        .flat_map(|n| {
+            n["text"]
+                .as_str()
+                .unwrap()
+                .lines()
+                .take(2)
+                .map(|line| line.chars().next().unwrap())
+        })
+        .collect();
+    assert_eq!(code, "北窗仍在观察");
+    for n in &sent {
+        assert!(n["text"].as_str().unwrap().encode_utf16().count() <= 2000);
+        assert_eq!(n["targets"], json!(["garden-first"]));
+    }
+    advance(&s, &mut e, "finished");
+    assert_eq!(notices(&s).len(), 5);
+}
+#[test]
+fn nursery_and_second_door_require_residents_in_the_matching_colony() {
+    let (_dir, s, token, window) = fixture();
+    configure(&s, window);
+    let root = next_thread(&s, &token);
+    participate(&s, window, "garden-first");
+    participate(&s, root, "garden-first");
+    let mut e = granary_entry("garden-first");
+    advance(&s, &mut e, "window");
+    advance(&s, &mut e, "granary");
+    nursery(&mut e);
+    e["state"]["eggs"][0]["inside"]["nestId"] = json!("other-nest");
+    advance(&s, &mut e, "wrong-nursery");
+    assert_eq!(notices(&s).len(), 2);
+    e["state"]["eggs"] = json!([]);
+    let mut child = e["state"]["bugs"][0].clone();
+    child["id"] = json!("ant-2");
+    child["role"] = json!("worker");
+    child["ageHours"] = json!(6);
+    child["inside"]["x"] = json!(2);
+    e["state"]["bugs"].as_array_mut().unwrap().push(child);
+    advance(&s, &mut e, "adult-worker");
+    assert_eq!(notices(&s).len(), 2);
+    e["state"]["bugs"][1]["ageHours"] = json!(5.99);
+    advance(&s, &mut e, "young-worker");
+    assert_eq!(notices(&s).len(), 3);
+    e["state"]["nests"][0]["size"] = json!(5);
+    e["state"]["nests"][0]["entrances"] = json!([]);
+    advance(&s, &mut e, "one-entrance");
+    assert_eq!(notices(&s).len(), 3);
+    e["state"]["nests"][0]["entrances"] = json!([{"x":3,"y":2}]);
+    for b in e["state"]["bugs"].as_array_mut().unwrap() {
+        b.as_object_mut().unwrap().remove("inside");
+    }
+    advance(&s, &mut e, "empty-nest");
+    assert_eq!(notices(&s).len(), 3);
+    e["state"]["bugs"][0]["inside"] = json!({"nestId":"nest-1","x":1,"y":1});
+    advance(&s, &mut e, "second-door");
+    assert_eq!(notices(&s).len(), 4);
+}

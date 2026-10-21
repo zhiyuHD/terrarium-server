@@ -940,48 +940,44 @@ async fn forum_and_logo_controls_require_admin_and_support_immediate_schedule_an
 #[tokio::test]
 async fn story_configuration_is_private_authenticated_and_persistent() {
     let (_dir, store) = fixture();
-    let token = store.admin_token(false).unwrap();
-    let readonly = private(application(store.clone(), false));
-    assert_eq!(
-        request(
-            readonly,
-            "PUT",
-            "/api/admin/story",
-            json!({"enabled":false}),
-            Some(&token)
-        )
-        .await
-        .0,
-        StatusCode::NOT_IMPLEMENTED
-    );
-    let api = private(application(store.clone(), true));
-    assert_eq!(
-        request(
+    for route in ["/api/admin/story", "/api/admin/story/granary"] {
+        let token = store.admin_token(false).unwrap();
+        let readonly = private(application(store.clone(), false));
+        assert_eq!(
+            request(
+                readonly,
+                "PUT",
+                route,
+                json!({"enabled":false}),
+                Some(&token)
+            )
+            .await
+            .0,
+            StatusCode::NOT_IMPLEMENTED
+        );
+        let api = private(application(store.clone(), true));
+        assert_eq!(
+            request(api.clone(), "PUT", route, json!({"enabled":false}), None)
+                .await
+                .0,
+            StatusCode::UNAUTHORIZED
+        );
+        let (status, value) = request(
             api.clone(),
             "PUT",
-            "/api/admin/story",
+            route,
             json!({"enabled":false}),
-            None
+            Some(&token),
         )
-        .await
-        .0,
-        StatusCode::UNAUTHORIZED
-    );
-    let (status, value) = request(
-        api.clone(),
-        "PUT",
-        "/api/admin/story",
-        json!({"enabled":false}),
-        Some(&token),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(value["enabled"], false);
-    assert_eq!(value["objective"]["minGrowthHours"], 18);
-    assert_eq!(
-        request(api, "GET", "/api/admin/story", Value::Null, Some(&token))
-            .await
-            .1,
-        value
-    );
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(value["enabled"], false);
+        assert_eq!(value["objective"]["habitat"], "land");
+        assert_eq!(
+            request(api, "GET", route, Value::Null, Some(&token))
+                .await
+                .1,
+            value
+        );
+    }
 }

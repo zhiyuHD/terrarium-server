@@ -24,3 +24,5 @@ pub mod story;
 mod forum_recommendation;
 
 pub mod forum_digest;
+
+mod story_text;

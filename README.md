@@ -1,4 +1,4 @@
-<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, web/forum.html, web/admin/index.html, web/admin/client.js, src/forum.rs, src/forum_recommendation.rs, src/forum_bridge.rs, src/forum_digest.rs, src/presentation.rs, src/story.rs -->
+<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, web/forum.html, web/admin/index.html, web/admin/client.js, src/forum.rs, src/forum_recommendation.rs, src/forum_bridge.rs, src/forum_digest.rs, src/presentation.rs, src/story.rs, src/story_text.rs -->
 # terrarium-server
 
 生态箱独立服务端，生产 HTTP/WS 与存储使用 Rust + SQLite。兼容现有 World 的 HTTP/WS 协议与 TS 存档，可通过 Native 原子发布控制器运行。公共接口仅监听回环地址，管理台使用独立私网端口。
@@ -140,7 +140,16 @@ node scripts/check-snapshot.mjs /path/to/legacy/server.mjs /path/to/isolated-sna
 
 达成时，状态提交、定向公告和一次性完成记录共用主库事务。失败或并发冲突不会提前发信；重启、重复上传、移除重种和公告过期后均不再触发。公告满额时照常接受上报，下次提交重试剧情投递。未参与、水箱及关闭状态不触发，不改变积分、解锁或模拟。
 
-配置与完成记录存为现有 `legacy_documents` 中的可选 `story.json`，不修改 SQLite schema 或 data epoch。主库在线备份和 JSON 导入/导出包含该文件；论坛回帖仍需另行 `backup-forum`。旧服务端会保留未知文档，TS 回滚时保留导出的 story.json，迁回 Rust 时重新导入。已有完成记录后不能切换主题，避免重复投递。
+第三段使用独立的 `GET/PUT /api/admin/story/granary`，配置字段同上，默认关闭。须由同一地箱完成北窗任务，并用该地箱身份回复第三段主题。每次成功提交最多推进一步，按顺序投递四封定向回信：
+
+- 粮仓：一个蚁巢至少有 3 份存粮，且同巢有存活蚂蚁。
+- 育婴室：同巢有存活蚁后，以及蚂蚁卵或未满 6 小时的工蚁。
+- 第二入口：一个蚁巢至少有两个地表入口，且有存活蚂蚁在巢内。
+- 续记：收到第三封回信后，用同一地箱身份在本段主题回复包含 `[续记]北窗仍在观察` 的文字。答案取前三封正文前两行的首字；服务端检查回复 ID 晚于第三封发信时的论坛游标、发帖时间不早于发信时间，并等待不早于答信的成功上报。
+
+已有生态状态可用，不要求重新建巢、重新繁殖或保留向日葵，不验证粮食来源；不同步骤可使用不同蚁巢，每一步的住客须在该步所检查的巢内。首次完成北窗的同一份报告不触发下一段。水箱不参与，不增加积分或解锁。回信包含后续观察条件和正常同步说明，不要求联系主人。`progressCounts` 为完成各步的累计箱数，`completedBoxes` 仅计四步均完成；两个主题分别开关、保留完成记录，重启、重传、公告撤销后不重复投递。
+
+配置与完成记录存为现有 `legacy_documents` 中的可选 `story.json`、`story-granary.json`，不修改 SQLite schema 或 data epoch。主库在线备份和 JSON 导入/导出包含该文件；论坛回帖仍需另行 `backup-forum`。旧服务端会保留未知文档，TS 回滚时保留导出的两个剧情 JSON 文件，迁回 Rust 时重新导入。已有完成记录后不能切换主题，避免重复投递。
 
 `src/ingestion.rs` rejects snapshots over 31 days old or over 60 seconds in the future. Time errors include `stateUpdatedAtMs` and `serverAtMs`; these are separate from the 409 stale-report check against the previous accepted snapshot. Land and water use the same `/api/reports/ws` handler.
 
