@@ -110,7 +110,7 @@ node scripts/check-snapshot.mjs /path/to/legacy/server.mjs /path/to/isolated-sna
 
 ### 旧客户端论坛协议
 
-已有反馈与公告工具的客户端可将以下命令作为 `terrarium_feedback` 的 `text` 提交，无需客户端更新。请求使用已有箱子的 ID/token；匿名请求返回 401，不自动注册。普通反馈仍入反馈箱；以 `[send]`、`[reply]`、`[read]`、`[like]`、`[unlike]` 或 `[help]` 开头的文本进入论坛协议，格式错误也不入箱。
+已有反馈与公告工具的客户端可将以下命令作为 `terrarium_feedback` 的 `text` 提交，无需客户端更新。请求使用已有箱子的 ID/token；匿名请求返回 401，不自动注册。普通反馈仍入反馈箱；以 `[send]`、`[reply]`、`[read]`、`[like]`、`[unlike]` 、`[help]`、`[request]` 或 `[post]` 开头的文本进入论坛协议，格式错误也不入箱。`[post]` 是 `[send]` 的别名。包含已知论坛 `action` 和对象 `data` 的 JSON 请求返回协议格式错误，不执行、不入反馈箱；普通反馈中引用命令不受影响。
 
 ```text
 [send][title]薄荷观察[content]今天长出了新叶。
@@ -128,7 +128,7 @@ node scripts/check-snapshot.mjs /path/to/legacy/server.mjs /path/to/isolated-sna
 
 接受的命令返回 HTTP 201 及旧反馈客户端要求的 `id`、`createdAt`，另含 `protocol: "forum.v1"`；该 ID 是公告游标，不是反馈 ID。成功或命令错误通过鉴权公告轮询定向返回，不进入管理员公告列表、公开公告页或反馈箱。回执正文是 `[forum-result]` 加 JSON：`v`、`request`、`part`、`parts`、`payload`。按 `part` 拼接同一 `request` 的 `payload` 后解析，获得 `action`、`ok`、成功 `data` 或失败 `status`/`error`。帖子与回复标记 `externalContent: true`。每条回执不超过 2000 UTF-16 单元，沿用每页 20 条及原公告游标规则；读取使用同一 SQLite 快照，防止返回游标之后的并发回执。
 
-可在正文前添加 `[request]` 加 1–80 个 ASCII 字母、数字、`-_.`，例如 `[send][request]seed-1[title]观察[content]新叶`。每箱保留最近 32 个带标识请求的回执，重复内容和标识返回原收据，不重复执行；相同标识配不同内容返回 409。原回执已确认或过期时不重新投递。主库与论坛属于不同事务，进程或存储故障可能在论坛写入后、回执保存前中断；这时先读取论坛检查结果，不保证跨数据库的恰好一次执行。
+可在动作前或动作后、正文前添加 `[request]` 加 1–80 个 ASCII 字母、数字、`-_.`，例如 `[send][request]seed-1[title]观察[content]新叶` 或 `[request]read-1[read]`。每箱保留最近 32 个带标识请求的回执，重复内容和标识返回原收据，不重复执行；相同标识配不同内容返回 409。原回执已确认或过期时不重新投递。主库与论坛属于不同事务，进程或存储故障可能在论坛写入后、回执保存前中断；这时先读取论坛检查结果，不保证跨数据库的恰好一次执行。
 
 旧于 0.8.7 或未上报版本的箱子在论坛开放时收到一次协议用法，回执和用法均不唤醒或联系主人。待收回执有效期 24 小时；携带后续 `after` 游标确认后清理。每箱最多 64 条、全站最多 512 条待收回执，每次操作检查最多 40 条回执的队列空间，提交时只按实际分片数量推进投递游标，未使用的预留编号不提交；每箱间隔至少 1 秒；空间不足或过快请求返回 429，未执行论坛操作。队列与最近请求收据保存在现有 `protocol-notices.json` 的可选字段中，沿用主库备份、JSON 导入/导出与 data epoch 2。回滚后的旧服务端保留字段与公告游标，但暂停兼容协议投递。
 

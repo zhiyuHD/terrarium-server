@@ -552,3 +552,130 @@ fn automatic_help_keeps_existing_high_cursors_and_uses_only_actual_parts() {
         .unwrap();
     assert_eq!(next["id"], 22227 + parts.len() as u64);
 }
+
+#[tokio::test]
+async fn request_prefixes_and_post_alias_route_through_feedback_http_and_keep_deduplication() {
+    let (_dir, s, a, _) = fixture();
+    let input = json!({"id":"garden-a","source":"ai","clientVersion":"0.8.6","text":"[request]seed-1\n[post][title]A leaf[content]One new leaf [read] is body text"});
+    let (status, receipt) = http(&s, Method::POST, "/api/feedback", input.clone(), Some(&a)).await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(receipt["protocol"], "forum.v1");
+    let (status, again) = http(&s, Method::POST, "/api/feedback", input.clone(), Some(&a)).await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(again["id"], receipt["id"]);
+    assert_eq!(again["duplicate"], true);
+    let mut changed = input;
+    changed["text"] = json!("[request]seed-1[post][title]Changed[content]Changed");
+    assert_eq!(
+        http(&s, Method::POST, "/api/feedback", changed, Some(&a))
+            .await
+            .0,
+        StatusCode::CONFLICT
+    );
+    let now = terrarium_server::ingestion::now_ms();
+    let (results, _) = read(&s, "garden-a", 0, now);
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0]["ok"], true);
+    assert_eq!(results[0]["action"], "send");
+    assert_eq!(
+        results[0]["data"]["body"],
+        "One new leaf [read] is body text"
+    );
+    command(&s, &a, "[request]read-1 [read]", now + 1001);
+    command(&s, &a, "[request]read-2[read]", now + 2002);
+    let (results, _) = read(&s, "garden-a", 0, now + 2002);
+    assert!(results.iter().all(|r| r["ok"] == true));
+    assert_eq!(
+        results.last().unwrap()["data"]["threads"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(
+        s.list_feedback(0).unwrap()["feedback"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        s.list_announcements().unwrap()["announcements"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn malformed_request_prefixes_and_json_envelopes_return_protocol_errors_without_storing_feedback()
+ {
+    let (_dir, s, a, _) = fixture();
+    let now = terrarium_server::ingestion::now_ms();
+    for (i, text) in [
+        "[request]missing-action",
+        "[request][read]",
+        "[request]bad id[read]",
+        "[request]one[read][request]two",
+        "[request]one[unknown]",
+        r#"{"action":"reply","data":{"threadId":1,"body":"A reply"},"request":"one","v":1}"#,
+        r#"{"action":"thread","data":{"id":1},"v":1}"#,
+    ]
+    .iter()
+    .enumerate()
+    {
+        if i == 0 {
+            let (status, receipt) = http(
+                &s,
+                Method::POST,
+                "/api/feedback",
+                json!({"id":"garden-a","source":"ai","text":text}),
+                Some(&a),
+            )
+            .await;
+            assert_eq!(status, StatusCode::CREATED);
+            assert_eq!(receipt["protocol"], "forum.v1");
+        } else {
+            assert!(forum_bridge::is_command(&json!({"text":text})));
+            command(&s, &a, text, now + (i as i64 + 1) * 1001);
+        }
+    }
+    let (results, _) = read(&s, "garden-a", 0, now + 9000);
+    assert_eq!(results.len(), 7);
+    assert!(
+        results
+            .iter()
+            .all(|r| r["ok"] == false && r["status"] == 400)
+    );
+    assert!(
+        s.list_feedback(0).unwrap()["feedback"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    for text in [
+        "反馈例子：[request]read-1[read]",
+        "[bug] Request format is confusing",
+        r#"{"action":"feedback","data":{"text":"Suggestion"}}"#,
+    ] {
+        assert!(!forum_bridge::is_command(&json!({"text":text})));
+    }
+    assert_eq!(
+        http(
+            &s,
+            Method::POST,
+            "/api/feedback",
+            json!({"source":"web","text":"反馈例子：[request]read-1[read]"}),
+            None
+        )
+        .await
+        .0,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        s.list_feedback(0).unwrap()["feedback"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
