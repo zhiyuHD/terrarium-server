@@ -171,7 +171,8 @@ impl Store {
                 boxes.score, boxes.reported_at,
                 json_extract(boxes.entry, '$.clientVersion'),
                 json_extract(boxes.entry, '$.coopanionVersion'),
-                json_extract(boxes.entry, '$.reportTransport')
+                json_extract(boxes.entry, '$.reportTransport'),
+                json_extract(boxes.entry, '$.clientSystem')
              FROM (SELECT id FROM credentials UNION SELECT id FROM boxes) ids
              LEFT JOIN credentials ON ids.id=credentials.id
              LEFT JOIN boxes ON ids.id=boxes.id ORDER BY ids.id",
@@ -187,10 +188,12 @@ impl Store {
                 r.get::<_, Option<String>>(6)?,
                 r.get::<_, Option<String>>(7)?,
                 r.get::<_, Option<String>>(8)?,
+                r.get::<_, Option<String>>(9)?,
             ))
         })?;
         rows.map(|row| {
-            let (id, registered, name, kind, score, reported, client, coopanion, transport) = row?;
+            let (id, registered, name, kind, score, reported, client, coopanion, transport, system) = row?;
+            let system: Option<Value> = system.map(|text| serde_json::from_str(&text)).transpose()?;
             Ok(json!({
                 "id": id,
                 "registered": registered,
@@ -200,6 +203,7 @@ impl Store {
                 "reportedAt": reported,
                 "clientVersion": client,
                 "coopanionVersion": coopanion,
+                "clientSystem": system,
                 "reportTransport": transport,
                 "wsConnections": 0
             }))

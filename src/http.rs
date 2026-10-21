@@ -252,7 +252,7 @@ async fn report(State(app): State<App>, headers: HeaderMap, request: Request) ->
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(e.body())).into_response(),
     }
     let mut report = json!({"state":input["state"]});
-    for key in ["phase", "clientVersion", "coopanionVersion"] {
+    for key in ["phase", "clientVersion", "coopanionVersion", "clientSystem"] {
         if let Some(value) = input.get(key) {
             report[key] = value.clone();
         }

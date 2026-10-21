@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 use terrarium_server::{
     legacy_validation::LegacyValidator,
     policy::meets_minimum,
-    protocol::{MAX_CHANGES, apply_changes, state_hash, valid_version},
+    protocol::{MAX_CHANGES, apply_changes, state_hash, valid_client_system, valid_version},
 };
 #[test]
 fn hashes_match_typescript_states_unicode_integer_keys_and_ecmascript_numbers() {
@@ -125,4 +125,22 @@ async fn legacy_land_versions_and_historical_timestamps_migrate_before_hash_vali
     }
     let migrated = validator.validate(&old).await.unwrap();
     assert_eq!(migrated, land);
+}
+
+#[test]
+fn client_system_metadata_has_only_bounded_name_and_version() {
+    assert!(valid_client_system(
+        &json!({"name":"Linux","version":"TestOS 2 (kernel 6.12)"})
+    ));
+    for value in [
+        Value::Null,
+        json!([]),
+        json!({}),
+        json!({"name":"Linux"}),
+        json!({"name":"Linux","version":"bad\nvalue"}),
+        json!({"name":"Linux","version":"v".repeat(201)}),
+        json!({"name":"Linux","version":"1","hostname":"private"}),
+    ] {
+        assert!(!valid_client_system(&value));
+    }
 }

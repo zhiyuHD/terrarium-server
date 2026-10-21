@@ -13,6 +13,22 @@ pub fn valid_version(value: &Value) -> bool {
         .as_str()
         .is_some_and(|s| s.len() <= 100 && PATTERN.is_match(s))
 }
+pub fn valid_client_system(value: &Value) -> bool {
+    value.as_object().is_some_and(|system| {
+        system.keys().all(|key| key == "name" || key == "version")
+            && ["name", "version"].iter().all(|key| {
+                system
+                    .get(*key)
+                    .and_then(Value::as_str)
+                    .is_some_and(|part| {
+                        !part.is_empty()
+                            && part.chars().count() <= 200
+                            && part.trim() == part
+                            && !part.chars().any(|c| c <= '\u{001f}' || c == '\u{007f}')
+                    })
+            })
+    })
+}
 pub fn valid_id(id: &str) -> bool {
     let b = id.as_bytes();
     (2..=40).contains(&b.len())

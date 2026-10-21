@@ -162,7 +162,7 @@ function renderBoxes() {
     const name = node("div");
     name.append(node("strong", box.name), node("span", `${box.kind === "land" ? "\u5730" : box.kind === "water" ? "\u6C34" : "\u5F85\u8BA4\u9886"} \xB7 ${box.id}`, "small muted"));
     nameCell.append(check, name);
-    row.append(nameCell, node("td", version(box)), node("td", box.coopanionVersion ?? "\u672A\u4E0A\u62A5"));
+    row.append(nameCell, node("td", version(box)), node("td", box.coopanionVersion ?? "\u672A\u4E0A\u62A5"), node("td", box.clientSystem ? `${box.clientSystem.name} · ${box.clientSystem.version}` : "\u672A\u4E0A\u62A5"));
     const connection = node("td"), live = node("span", "", box.wsConnections ? "pill" : "muted");
     iconLabel(live, box.wsConnections ? "wifi" : "wifi-off", box.wsConnections ? `WS \u5728\u7EBF (${box.wsConnections})` : "WS \u672A\u8FDE\u63A5");
     connection.append(live, node("span", `\u6700\u8FD1\u63D0\u4EA4\uFF1A${box.reportTransport === "websocket" ? "WS" : box.reportTransport === "http" ? "HTTP" : "\u672A\u77E5"}`, "small muted"));
@@ -171,7 +171,7 @@ function renderBoxes() {
   }
   if (!visible.length) {
     const row = node("tr"), cell = node("td", "\u6CA1\u6709\u7B26\u5408\u6761\u4EF6\u7684\u76D2\u5B50", "empty");
-    cell.colSpan = 6;
+    cell.colSpan = 7;
     row.append(cell);
     rows.append(row);
   }

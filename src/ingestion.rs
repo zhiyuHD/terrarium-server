@@ -1,7 +1,7 @@
 use crate::{
     legacy_validation::LegacyValidator,
     policy::{Gate, iso},
-    protocol::{apply_changes, state_hash, valid_hash, valid_version},
+    protocol::{apply_changes, state_hash, valid_client_system, valid_hash, valid_version},
     scoring::score,
     store::{Store, random_hex},
 };
@@ -133,6 +133,12 @@ impl Ingestion {
             }
         }
         if input
+            .get("clientSystem")
+            .is_some_and(|value| !valid_client_system(value))
+        {
+            return Err(ReportError::new(400, "Invalid report metadata"));
+        }
+        if input
             .get("phase")
             .is_some_and(|v| v != "day" && v != "night")
         {
@@ -203,7 +209,7 @@ impl Ingestion {
         }
         let points = score(&state).map_err(|_| ReportError::new(400, "Invalid report"))?;
         let mut entry = json!({"id":id,"kind":kind,"state":state,"reportTransport":transport,"score":points,"reportedAt":iso(now),"reportRevision":random_hex(16)});
-        for key in ["phase", "clientVersion", "coopanionVersion"] {
+        for key in ["phase", "clientVersion", "coopanionVersion", "clientSystem"] {
             if let Some(value) = input.get(key) {
                 entry[key] = value.clone();
             }

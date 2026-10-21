@@ -105,7 +105,9 @@ async fn http_registration_authentication_full_reports_bounds_and_restart_export
         StatusCode::CONFLICT
     );
     let state = fixture("water");
-    let input = json!({"id":id,"state":state,"clientVersion":"0.8.5","phase":"day"});
+    let system = json!({"name":"Linux","version":"TestOS 2 (kernel 6.12)"});
+    let input =
+        json!({"id":id,"state":state,"clientVersion":"0.8.5","phase":"day","clientSystem":system});
     assert_eq!(
         http(
             api.clone(),
@@ -132,6 +134,23 @@ async fn http_registration_authentication_full_reports_bounds_and_restart_export
         StatusCode::OK
     );
     let first = store.get(id).unwrap().unwrap();
+    assert_eq!(first["clientSystem"], system);
+    for system in [
+        Value::Null,
+        json!({}),
+        json!({"name":"Linux","version":"bad\nvalue"}),
+        json!({"name":"Linux","version":"1","hostname":"private"}),
+    ] {
+        let mut invalid = input.clone();
+        invalid["clientSystem"] = system;
+        assert_eq!(
+            http(api.clone(), "PUT", "/api/reports", invalid, Some(token))
+                .await
+                .0,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(store.get(id).unwrap().unwrap(), first);
+    }
     let mut invalid = input.clone();
     invalid["state"]["fish"] = json!([{}]);
     assert_eq!(
@@ -278,7 +297,14 @@ async fn websocket_full_delta_checksum_recovery_sequence_and_reconnect_never_com
         json!({"kind":"resync","seq":1})
     );
     assert!(store.get("test-box").unwrap().is_none());
-    let ack = send(&mut ws, full(2, &state)).await;
+    let system = json!({"name":"Windows","version":"10.0.26100"});
+    let mut report = full(2, &state);
+    report["clientSystem"] = system.clone();
+    let ack = send(&mut ws, report).await;
+    assert_eq!(
+        store.get("test-box").unwrap().unwrap()["clientSystem"],
+        system
+    );
     assert_eq!(ack["kind"], "ack");
     assert_eq!(ack["stateHash"], state_hash(&state));
     assert_eq!(
@@ -287,7 +313,7 @@ async fn websocket_full_delta_checksum_recovery_sequence_and_reconnect_never_com
     );
     let mut changed = state.clone();
     changed["name"] = json!("Another garden");
-    let delta = json!({"protocol":1,"kind":"delta","seq":3,"phase":"night","clientVersion":"0.8.5","baseRevision":ack["revision"],"baseHash":state_hash(&state),"stateHash":state_hash(&changed),"changes":[{"op":"add","path":"/name","value":"Another garden"}]});
+    let delta = json!({"protocol":1,"kind":"delta","seq":3,"phase":"night","clientVersion":"0.8.5","clientSystem":{"name":"macOS","version":"15.0.1"},"baseRevision":ack["revision"],"baseHash":state_hash(&state),"stateHash":state_hash(&changed),"changes":[{"op":"add","path":"/name","value":"Another garden"}]});
     let ack = send(&mut ws, delta.clone()).await;
     assert_eq!(ack["kind"], "ack");
     assert_eq!(
@@ -295,6 +321,10 @@ async fn websocket_full_delta_checksum_recovery_sequence_and_reconnect_never_com
         changed["name"]
     );
     let accepted = store.get("test-box").unwrap().unwrap();
+    assert_eq!(
+        accepted["clientSystem"],
+        json!({"name":"macOS","version":"15.0.1"})
+    );
     let mut corrupt = delta.clone();
     corrupt["seq"] = json!(4);
     corrupt["baseRevision"] = ack["revision"].clone();

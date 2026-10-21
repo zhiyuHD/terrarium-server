@@ -759,7 +759,7 @@ async fn real_private_listener_serves_assets_and_reports_live_ws_counts_and_acce
         .unwrap()["land"]
         .clone();
     state["updatedAtMs"] = json!(now_ms());
-    ws.send(Message::Text(json!({"kind":"full","protocol":1,"seq":1,"phase":"day","clientVersion":"0.8.5","state":state}).to_string().into())).await.unwrap();
+    ws.send(Message::Text(json!({"kind":"full","protocol":1,"seq":1,"phase":"day","clientVersion":"0.8.5","clientSystem":{"name":"Linux","version":"TestOS 2"},"state":state}).to_string().into())).await.unwrap();
     let reply = tokio::time::timeout(Duration::from_secs(5), ws.next())
         .await
         .unwrap()
@@ -776,6 +776,10 @@ async fn real_private_listener_serves_assets_and_reports_live_ws_counts_and_acce
     assert_eq!(snapshot["boxes"][0]["wsConnections"], 1);
     assert_eq!(snapshot["boxes"][0]["registered"], true);
     assert_eq!(snapshot["boxes"][0]["clientVersion"], "0.8.5");
+    assert_eq!(
+        snapshot["boxes"][0]["clientSystem"],
+        json!({"name":"Linux","version":"TestOS 2"})
+    );
     assert_eq!(snapshot["acceptedReports"]["websocket"], 1);
     assert!(snapshot["uptimeSec"].as_f64().unwrap() > 0.0);
     #[cfg(target_os = "linux")]
