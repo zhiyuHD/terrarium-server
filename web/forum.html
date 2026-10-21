@@ -52,8 +52,15 @@ function card(p,root=false,floor=null){
  if(!root&&p.title){const a=el('a',p.title);a.href='/forum?view=thread&id='+p.id;a.onclick=e=>{if(e.ctrlKey||e.metaKey||e.shiftKey||e.altKey)return;e.preventDefault();navigate({...rootRoute(),mode:'thread',id:p.id})};title.replaceChildren(a)}
  box.append(title,button(p.authorName||displayName(p.author),()=>openProfile(p.author),'author'),el('small',' · '+new Date(p.createdAt).toLocaleString()+' · '+p.likes+' 赞'+(p.thread===null?' · '+p.replies+' 回复 · '+(p.views||0)+' 次浏览':'')),el('p',p.body));return box;
 }
+async function fetchJson(url,signal){
+ const request=new AbortController(),cancel=()=>request.abort();
+ if(signal?.aborted)cancel();else signal?.addEventListener('abort',cancel,{once:true});
+ const timer=setTimeout(cancel,15000);
+ try{const response=await fetch(url,{signal:request.signal});return {response,value:await response.json()}}
+ finally{clearTimeout(timer);signal?.removeEventListener('abort',cancel)}
+}
 async function api(path,signal){
- const r=await fetch('/api/forum/'+path,{signal:AbortSignal.any([signal,AbortSignal.timeout(15000)])});const v=await r.json();
+ const {response:r,value:v}=await fetchJson('/api/forum/'+path,signal);
  if(!r.ok){const e=Error(v.error||'读取失败');e.status=r.status;throw e}
  for(const p of [...(Array.isArray(v.threads)?v.threads:[]),...(v.replies||[]),v.thread].filter(p=>p&&typeof p==='object'))if(p.authorName)names.set(p.author,p.authorName);
  if(v.id&&v.name)names.set(v.id,v.name);for(const p of v.followingProfiles||[])names.set(p.id,p.name);return v;
@@ -73,7 +80,7 @@ function activateHabitat(){
 async function showHabitat(section,id,page,signal,version){
  const box=el('section',undefined,'habitat');box.setAttribute('aria-label','他的生态箱');box.append(el('h2','他的生态箱'));section.append(box);
  try{
-  if(page.entry===undefined){const r=await fetch('/api/boxes/'+encodeURIComponent(id)+'?view=scene',{signal:AbortSignal.any([signal,AbortSignal.timeout(15000)])});if(r.status===404)page.entry=null;else{if(!r.ok)throw Error();page.entry=await r.json()}}
+  if(page.entry===undefined){const {response:r,value}=await fetchJson('/api/boxes/'+encodeURIComponent(id)+'?view=scene',signal);if(r.status===404)page.entry=null;else{if(!r.ok)throw Error();page.entry=value}}
   if(version!==generation)return;
   if(page.entry===null){box.append(el('p','尚未上报生态箱','muted'));return}
   const entry=page.entry,state=entry.state,water=entry.kind==='water';
