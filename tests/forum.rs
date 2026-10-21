@@ -27,6 +27,103 @@ fn fixture() -> (TempDir, Store, String, String) {
         .to_owned();
     (dir, s, a, b)
 }
+
+#[test]
+fn names_follow_current_box_names_without_changing_post_authors_or_follow_ids() {
+    let (_dir, s, a, b) = fixture();
+    s.update_named_control("forum", &json!({"enabled":true}), 0)
+        .unwrap();
+    let cases: Vec<Value> = serde_json::from_str(include_str!("fixtures/scores.json")).unwrap();
+    let mut entry = json!({"id":"garden-a","kind":"land","state":cases[0]["state"],"reportedAt":"2026-10-20T00:00:00.000Z","reportRevision":"names-1"});
+    entry["state"]["name"] = json!("薄荷小院 <花园>");
+    assert!(s.commit_entry(&entry, None).unwrap());
+    let post = run(
+        &s,
+        Method::POST,
+        "threads",
+        &[],
+        body("garden-a", "新叶"),
+        &a,
+        1000,
+    )
+    .unwrap();
+    assert_eq!(post["author"], "garden-a");
+    assert_eq!(post["authorName"], "薄荷小院 <花园>");
+    let reply = run(
+        &s,
+        Method::POST,
+        "threads/1/replies",
+        &[],
+        body("garden-b", "我也来看看"),
+        &b,
+        2000,
+    )
+    .unwrap();
+    assert_eq!(reply["authorName"], "未命名的生态箱");
+    run(
+        &s,
+        Method::PUT,
+        "follows",
+        &[],
+        json!({"id":"garden-b","clientVersion":"0.8.7","targetId":"garden-a","following":true}),
+        &b,
+        3000,
+    )
+    .unwrap();
+    let profile = run(
+        &s,
+        Method::GET,
+        "profiles/garden-b",
+        &[],
+        Value::Null,
+        "",
+        3000,
+    )
+    .unwrap();
+    assert_eq!(profile["following"], json!(["garden-a"]));
+    assert_eq!(
+        profile["followingProfiles"],
+        json!([{"id":"garden-a","name":"薄荷小院 <花园>"}])
+    );
+    let previous = entry.clone();
+    entry["reportRevision"] = json!("names-2");
+    entry["state"]["name"] = json!("新叶小院");
+    assert!(s.commit_entry(&entry, Some(&previous)).unwrap());
+    let thread = run(&s, Method::GET, "threads/1", &[], Value::Null, "", 4000).unwrap();
+    assert_eq!(thread["thread"]["author"], "garden-a");
+    assert_eq!(thread["thread"]["authorName"], "新叶小院");
+    let listed = run(
+        &s,
+        Method::GET,
+        "threads",
+        &[("author", "garden-a")],
+        Value::Null,
+        "",
+        4000,
+    )
+    .unwrap();
+    assert_eq!(listed["threads"][0]["authorName"], "新叶小院");
+    let profile = run(
+        &s,
+        Method::GET,
+        "profiles/garden-a",
+        &[],
+        Value::Null,
+        "",
+        4000,
+    )
+    .unwrap();
+    assert_eq!(profile["id"], "garden-a");
+    assert_eq!(profile["name"], "新叶小院");
+    let previous = entry.clone();
+    entry["reportRevision"] = json!("names-3");
+    entry["state"].as_object_mut().unwrap().remove("name");
+    assert!(s.commit_entry(&entry, Some(&previous)).unwrap());
+    assert_eq!(
+        run(&s, Method::GET, "threads/1", &[], Value::Null, "", 5000).unwrap()["thread"]["authorName"],
+        "未命名地箱"
+    );
+}
 fn run(
     s: &Store,
     method: Method,

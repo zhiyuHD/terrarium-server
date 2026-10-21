@@ -13,7 +13,10 @@ use axum::{
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::{BTreeSet, HashMap},
+    time::Duration,
+};
 use tokio::sync::Semaphore;
 static REQUESTS: Semaphore = Semaphore::const_new(12);
 const SCHEMA: &str = "
@@ -159,6 +162,107 @@ fn rate(conn: &Connection, author: &str, action: &str, now: i64, interval: i64) 
     Ok(())
 }
 pub fn execute(
+    store: &Store,
+    method: &Method,
+    path: &str,
+    query: &HashMap<String, String>,
+    input: &Value,
+    token: &str,
+    now: i64,
+) -> Result<Value> {
+    let mut value = execute_raw(store, method, path, query, input, token, now)?;
+    display_names(store, &mut value)?;
+    Ok(value)
+}
+
+fn display_names(store: &Store, value: &mut Value) -> Result<()> {
+    let mut ids = BTreeSet::new();
+    fn collect(value: &Value, ids: &mut BTreeSet<String>) {
+        if let Some(author) = value["author"].as_str() {
+            ids.insert(author.to_owned());
+        }
+        if let Some(thread) = value.get("thread").filter(|v| v.is_object()) {
+            collect(thread, ids);
+        }
+        for key in ["threads", "replies"] {
+            if let Some(posts) = value[key].as_array() {
+                for post in posts {
+                    collect(post, ids);
+                }
+            }
+        }
+    }
+    collect(value, &mut ids);
+    if let Some(following) = value["following"].as_array() {
+        if let Some(id) = value["id"].as_str() {
+            ids.insert(id.to_owned());
+        }
+        for id in following.iter().filter_map(Value::as_str) {
+            ids.insert(id.to_owned());
+        }
+    }
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let conn = store.reader()?;
+    let sql = format!(
+        "SELECT id,json_extract(entry,'$.state.name'),kind FROM boxes WHERE id IN ({})",
+        vec!["?"; ids.len()].join(",")
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let names: HashMap<String, String> = stmt
+        .query_map(rusqlite::params_from_iter(ids.iter()), |r| {
+            let name: Option<String> = r.get(1)?;
+            let kind: String = r.get(2)?;
+            Ok((
+                r.get(0)?,
+                name.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| {
+                    if kind == "water" {
+                        "未命名水箱"
+                    } else {
+                        "未命名地箱"
+                    }
+                    .to_owned()
+                }),
+            ))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    fn name(names: &HashMap<String, String>, id: &str) -> String {
+        names
+            .get(id)
+            .cloned()
+            .unwrap_or_else(|| "未命名的生态箱".to_owned())
+    }
+    fn decorate(value: &mut Value, names: &HashMap<String, String>) {
+        if let Some(author) = value["author"].as_str() {
+            value["authorName"] = json!(name(names, author));
+        }
+        if let Some(thread) = value.get_mut("thread").filter(|v| v.is_object()) {
+            decorate(thread, names);
+        }
+        for key in ["threads", "replies"] {
+            if let Some(posts) = value.get_mut(key).and_then(Value::as_array_mut) {
+                for post in posts {
+                    decorate(post, names);
+                }
+            }
+        }
+    }
+    decorate(value, &names);
+    if let Some(following) = value["following"].as_array() {
+        let profiles: Vec<_> = following
+            .iter()
+            .filter_map(Value::as_str)
+            .map(|id| json!({"id":id,"name":name(&names,id)}))
+            .collect();
+        let own = name(&names, value["id"].as_str().unwrap());
+        value["name"] = json!(own);
+        value["followingProfiles"] = json!(profiles);
+    }
+    Ok(())
+}
+
+fn execute_raw(
     store: &Store,
     method: &Method,
     path: &str,

@@ -1,4 +1,4 @@
-<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, src/forum.rs, src/forum_bridge.rs, src/presentation.rs, src/story.rs -->
+<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, web/forum.html, src/forum.rs, src/forum_bridge.rs, src/presentation.rs, src/story.rs -->
 # terrarium-server
 
 生态箱独立服务端，生产 HTTP/WS 与存储使用 Rust + SQLite。兼容现有 World 的 HTTP/WS 协议与 TS 存档，可通过 Native 原子发布控制器运行。公共接口仅监听回环地址，管理台使用独立私网端口。
@@ -101,6 +101,8 @@ node scripts/check-snapshot.mjs /path/to/legacy/server.mjs /path/to/isolated-sna
 - `PUT /api/forum/likes`：`postId`、`liked`；`PUT /api/forum/follows`：`targetId`、`following`。相同目标值重复提交不增加计数。
 
 写操作使用已注册箱子的 Bearer token，body 携带该箱子 `id` 与 `clientVersion`；不会创建新身份。线程标题 120 字、正文 4000 字，回复 2000 字；写请求最多 16 KiB。每箱新帖间隔 1 分钟、回复 10 秒、点赞/关注变更各 1 秒。每箱最多 500 个主题、5000 条回复、5000 个点赞、500 个关注；全站最多 100000 条帖子与回复。论坛同时处理最多 12 个请求，繁忙时返回 429。搜索使用 SQLite FTS5 trigram，短于三个字符时按字面子串搜索；正文作为文本展示。
+
+论坛页面的作者、资料页、关注名单与筛选提示显示箱子当前名字，未命名时显示“未命名地箱”“未命名水箱”或“未命名的生态箱”。帖子与回复增加 `authorName`，资料增加 `name`、`followingProfiles: [{id,name}]`；`author`、`id` 和 `following` 保留原 ID 语义。名字按当前页的身份批量查询，箱子改名后历史帖子一起显示新名字，同名箱子仍按 ID 区分。协议兼容回执也包含这些名字。
 
 私网管理台的 `PUT /api/admin/controls/forum` 接受 `enabled` 与可选 `at`，`PUT /api/admin/controls/logo` 接受 `version`（0.8.6 或 0.8.7）与可选 `at`；`{cancel:true}` 取消对应定时。立即设置会清除原定时。`GET /api/presentation` 返回所选字标。默认旧字标与关闭论坛，云控状态随主库备份和迁移。
 
