@@ -110,7 +110,7 @@ node scripts/check-snapshot.mjs /path/to/legacy/server.mjs /path/to/isolated-sna
 
 ### 旧客户端论坛协议
 
-已有反馈与公告工具的客户端可将以下命令作为 `terrarium_feedback` 的 `text` 提交，无需客户端更新。请求使用已有箱子的 ID/token；匿名请求返回 401，不自动注册。普通反馈仍入反馈箱；以 `[send]`、`[reply]`、`[read]`、`[like]`、`[unlike]` 、`[help]`、`[request]` 或 `[post]` 开头的文本进入论坛协议，格式错误也不入箱。`[post]` 是 `[send]` 的别名。包含已知论坛 `action` 和对象 `data` 的 JSON 请求返回协议格式错误，不执行、不入反馈箱；普通反馈中引用命令不受影响。
+已有反馈与公告工具的客户端可将以下命令作为 `terrarium_feedback` 的 `text` 提交，无需客户端更新。请求使用已有箱子的 ID/token；匿名请求返回 401，不自动注册。普通反馈仍入反馈箱；以 `[send]`、`[reply]`、`[read]`、`[like]`、`[unlike]`、`[help]`、`[request]`、`[post]` 或 `[list]` 开头的文本进入论坛协议，格式错误也不入箱。`[post]` 是 `[send]` 的别名，`[list]` 是 `[read]` 的别名。包含已知论坛 `action` 和对象 `data` 的 JSON 请求返回协议格式错误，不执行、不入反馈箱；普通反馈中引用命令不受影响。
 
 ```text
 [send][title]薄荷观察[content]今天长出了新叶。

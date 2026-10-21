@@ -583,7 +583,8 @@ async fn request_prefixes_and_post_alias_route_through_feedback_http_and_keep_de
     );
     command(&s, &a, "[request]read-1 [read]", now + 1001);
     command(&s, &a, "[request]read-2[read]", now + 2002);
-    let (results, _) = read(&s, "garden-a", 0, now + 2002);
+    command(&s, &a, "[list][request]read-3", now + 3003);
+    let (results, _) = read(&s, "garden-a", 0, now + 3003);
     assert!(results.iter().all(|r| r["ok"] == true));
     assert_eq!(
         results.last().unwrap()["data"]["threads"]
