@@ -269,7 +269,7 @@ fn client_mut<'a>(clients: &'a mut Value, id: &str) -> &'a mut Value {
         .entry(id.to_owned())
         .or_insert_with(|| json!({"transport":"http"}))
 }
-fn allocate(conn: &Connection, count: usize) -> Result<u64> {
+pub(crate) fn allocate(conn: &Connection, count: usize) -> Result<u64> {
     let mut doc = document(conn, "announcements.json")?
         .unwrap_or_else(|| json!({"nextId":1,"announcements":[]}));
     let start = doc["nextId"].as_u64().unwrap();
@@ -427,7 +427,8 @@ pub fn prepare_poll(store: &Store, id: &str, version: &Value, after: u64, now: i
     })
 }
 pub fn notices(conn: &Connection, id: &str, after: u64, now: i64) -> Result<Vec<Value>> {
-    Ok(clients(conn)?[id]["forumReplies"]
+    let all = clients(conn)?;
+    let mut notices: Vec<Value> = all[id]["forumReplies"]
         .as_array()
         .into_iter()
         .flatten()
@@ -435,5 +436,7 @@ pub fn notices(conn: &Connection, id: &str, after: u64, now: i64) -> Result<Vec<
             n["id"].as_u64().unwrap_or(0) > after && at(&n["expiresAt"]).is_some_and(|at| at > now)
         })
         .cloned()
-        .collect())
+        .collect();
+    notices.extend(crate::forum_digest::notices(conn, &all, after, now)?);
+    Ok(notices)
 }

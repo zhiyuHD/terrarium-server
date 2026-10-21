@@ -26,6 +26,31 @@ fn score(created: i64, now: i64, likes: i64, replies: i64, views: i64) -> f64 {
         + 6.0 * replies.clamp(0, 20) as f64 / 20.0
         + 3.0 * views.clamp(0, 100) as f64 / 100.0
 }
+pub(crate) fn ranked_threads(
+    conn: &Connection,
+    query: &HashMap<String, String>,
+    now: i64,
+) -> Result<Vec<Value>> {
+    let mut rows = forum::thread_rows(conn, query, i64::MAX, CANDIDATES)?;
+    let rank = |p: &Value| {
+        let created = chrono::DateTime::parse_from_rfc3339(p["createdAt"].as_str().unwrap())
+            .unwrap()
+            .timestamp_millis();
+        score(
+            created,
+            now,
+            p["likes"].as_i64().unwrap(),
+            p["replies"].as_i64().unwrap(),
+            p["views"].as_i64().unwrap(),
+        )
+    };
+    rows.sort_by(|a, b| {
+        rank(b)
+            .total_cmp(&rank(a))
+            .then_with(|| b["id"].as_i64().cmp(&a["id"].as_i64()))
+    });
+    Ok(rows)
+}
 pub(crate) fn page(
     store: &Store,
     conn: &Connection,
@@ -40,24 +65,7 @@ pub(crate) fn page(
         .map(|k| query.get(*k).cloned().unwrap_or_default())
         .collect();
     let fresh = if before == i64::MAX {
-        let mut rows = forum::thread_rows(conn, query, i64::MAX, CANDIDATES)?;
-        let rank = |p: &Value| {
-            let created = chrono::DateTime::parse_from_rfc3339(p["createdAt"].as_str().unwrap())
-                .unwrap()
-                .timestamp_millis();
-            score(
-                created,
-                now,
-                p["likes"].as_i64().unwrap(),
-                p["replies"].as_i64().unwrap(),
-                p["views"].as_i64().unwrap(),
-            )
-        };
-        rows.sort_by(|a, b| {
-            rank(b)
-                .total_cmp(&rank(a))
-                .then_with(|| b["id"].as_i64().cmp(&a["id"].as_i64()))
-        });
+        let rows = ranked_threads(conn, query, now)?;
         Some(
             rows.iter()
                 .map(|p| p["id"].as_i64().unwrap())

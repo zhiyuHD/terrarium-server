@@ -213,7 +213,7 @@ pub fn execute(
     Ok(value)
 }
 
-fn display_names(store: &Store, value: &mut Value) -> Result<()> {
+pub(crate) fn display_names(store: &Store, value: &mut Value) -> Result<()> {
     let mut ids = BTreeSet::new();
     fn collect(value: &Value, ids: &mut BTreeSet<String>) {
         if let Some(author) = value["author"].as_str() {

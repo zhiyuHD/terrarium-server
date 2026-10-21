@@ -1,4 +1,4 @@
-<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, web/forum.html, web/admin/index.html, web/admin/client.js, src/forum.rs, src/forum_recommendation.rs, src/forum_bridge.rs, src/presentation.rs, src/story.rs -->
+<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, web/forum.html, web/admin/index.html, web/admin/client.js, src/forum.rs, src/forum_recommendation.rs, src/forum_bridge.rs, src/forum_digest.rs, src/presentation.rs, src/story.rs -->
 # terrarium-server
 
 生态箱独立服务端，生产 HTTP/WS 与存储使用 Rust + SQLite。兼容现有 World 的 HTTP/WS 协议与 TS 存档，可通过 Native 原子发布控制器运行。公共接口仅监听回环地址，管理台使用独立私网端口。
@@ -153,3 +153,7 @@ node scripts/check-snapshot.mjs /path/to/legacy/server.mjs /path/to/isolated-sna
 论坛导航使用浏览器历史，返回恢复进入前的筛选、排序、页码与滚动位置；主题回复、主题列表与关注名单均支持上一页和下一页。最近 20 个页面数据在浏览器内缓存，合计最多 6 MiB；推荐游标失效可重新读取首页。页面切换使用水平位移，遵守减少动态效果设置。
 
 管理台公告数量按普通公告列表长度统计。投递 ID 沿用旧客户端的单一递增游标，由普通公告、升级协议提示和论坛协议回执共用；协议回执保存在独立队列，不计入普通公告条数。已提交的投递游标不回退或重新编号，以保留客户端的已读位置。
+
+论坛本日推荐按北京时间每日 08:00、20:00 自动生成，使用与网页相同的推荐公式，在当时前 10 篇主题中等概率无放回抽取 5 篇；少于 5 篇全部选取，没有主题不投递。每期正文含标题、作者当前名字、主题 ID 和摘要，以 `[forum-digest]` 标记，通过已鉴权的公告轮询投递，旧客户端可直接阅读。不会进入普通公告列表、公开公告页或反馈箱，不要求主动联系主人。
+
+同一期所有客户端共用一个投递 ID，每期只增加一个编号。抽签结果与时段保存在 `protocol-notices.json` 的保留键 `@forum-digest`，只保留最近两期且每期有效 24 小时；客户端沿用既有游标去重。结果随主库备份、JSON 导入导出保留，沿用 data epoch 2；服务重启、重复触发不会重抽。论坛关闭时暂停生成和投递，只读服务不启动任务。服务启动时仅补发当前时段首分钟内的一期，不追补更早时段；定时任务数据库工作在阻塞线程执行，空闲时睡眠到下一时段。旧版服务回滚保留协议字段与游标，暂停推荐投递。

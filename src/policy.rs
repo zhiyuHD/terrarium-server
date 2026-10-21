@@ -171,6 +171,7 @@ pub(crate) fn validate_document(name: &str, value: &Value) -> Result<()> {
                     );
                 }
                 crate::forum_bridge::validate(client)?;
+                crate::forum_digest::validate(client)?;
             }
         }
         _ => {}

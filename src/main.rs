@@ -160,6 +160,7 @@ async fn run() -> Result<()> {
             if admin_listener.is_some() {
                 store.admin_token(enable_writes)?;
             }
+            let digest_store = store.clone();
             let app = App {
                 store,
                 ingestion,
@@ -181,6 +182,7 @@ async fn run() -> Result<()> {
             );
             let (shutdown, receiver) = tokio::sync::watch::channel(false);
             let public_stop = receiver.clone();
+            let digest_stop = receiver.clone();
             let public = async move {
                 axum::serve(listener, router(app))
                     .with_graceful_shutdown(wait_for_shutdown(public_stop))
@@ -204,7 +206,12 @@ async fn run() -> Result<()> {
                 let _ = shutdown.send(true);
                 Ok::<(), std::io::Error>(())
             };
-            tokio::try_join!(public, admin, stop)?;
+            tokio::try_join!(
+                public,
+                admin,
+                stop,
+                terrarium_server::forum_digest::run(digest_store, enable_writes, digest_stop)
+            )?;
         }
     }
     Ok(())

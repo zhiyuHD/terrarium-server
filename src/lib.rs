@@ -22,3 +22,5 @@ pub mod presentation;
 pub mod story;
 
 mod forum_recommendation;
+
+pub mod forum_digest;
