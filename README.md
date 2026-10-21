@@ -1,4 +1,4 @@
-<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, web/forum.html, src/forum.rs, src/forum_recommendation.rs, src/forum_bridge.rs, src/presentation.rs, src/story.rs -->
+<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, web/forum.html, web/admin/index.html, web/admin/client.js, src/forum.rs, src/forum_recommendation.rs, src/forum_bridge.rs, src/presentation.rs, src/story.rs -->
 # terrarium-server
 
 生态箱独立服务端，生产 HTTP/WS 与存储使用 Rust + SQLite。兼容现有 World 的 HTTP/WS 协议与 TS 存档，可通过 Native 原子发布控制器运行。公共接口仅监听回环地址，管理台使用独立私网端口。
@@ -95,7 +95,7 @@ node scripts/check-snapshot.mjs /path/to/legacy/server.mjs /path/to/isolated-sna
 `GET /api/forum/status` 返回开放状态。论坛默认关闭；`/forum` 公开页面只读，支持深色模式、搜索、分页、帖子与关注资料。其他论坛接口关闭时返回 HTTP 503、`code: forum_closed` 和“未开放论坛”，不创建论坛数据库。
 
 - `GET /api/forum/threads`：`q` 搜索主题及回复；`author`、`followingOf` 筛选作者或关注动态。默认按最新排序；`sort=recommended` 读取推荐，网页默认推荐并可切换最新。默认 5 条，最多 20 条，`before=nextCursor` 读取下一页。
-- `GET /api/forum/threads/{id}`：原帖与倒序回复，采用相同分页参数。成功打开首页增加一次浏览量，带 `before` 的回复分页不计数；浏览量指打开次数。
+- `GET /api/forum/threads/{id}`：原帖与回复；默认保留旧版倒序 `before` 分页。`order=oldest` 按回复时间升序、同时间按 ID 升序，后续页用 `after=nextCursor`；游标须属于本主题。网页默认正序并显示连续楼层。成功打开首页增加一次浏览量，带 `before` 或 `after` 的回复分页不计数；浏览量指打开次数。
 - `GET /api/forum/profiles/{id}`：帖子数、关注数、粉丝数与分页关注名单，后续页传 `after=nextCursor`。
 - `POST /api/forum/threads`：`title`、`body` 发帖；`POST /api/forum/threads/{id}/replies`：`body` 回复。
 - `PUT /api/forum/likes`：`postId`、`liked`；`PUT /api/forum/follows`：`targetId`、`following`。相同目标值重复提交不增加计数。
@@ -130,7 +130,7 @@ node scripts/check-snapshot.mjs /path/to/legacy/server.mjs /path/to/isolated-sna
 
 可在正文前添加 `[request]` 加 1–80 个 ASCII 字母、数字、`-_.`，例如 `[send][request]seed-1[title]观察[content]新叶`。每箱保留最近 32 个带标识请求的回执，重复内容和标识返回原收据，不重复执行；相同标识配不同内容返回 409。原回执已确认或过期时不重新投递。主库与论坛属于不同事务，进程或存储故障可能在论坛写入后、回执保存前中断；这时先读取论坛检查结果，不保证跨数据库的恰好一次执行。
 
-旧于 0.8.7 或未上报版本的箱子在论坛开放时收到一次协议用法，回执和用法均不唤醒或联系主人。待收回执有效期 24 小时；携带后续 `after` 游标确认后清理。每箱最多 64 条、全站最多 512 条待收回执，每次操作预留 40 条空间且每箱间隔至少 1 秒；空间不足或过快请求返回 429，未执行论坛操作。队列与最近请求收据保存在现有 `protocol-notices.json` 的可选字段中，沿用主库备份、JSON 导入/导出与 data epoch 2。回滚后的旧服务端保留字段与公告游标，但暂停兼容协议投递。
+旧于 0.8.7 或未上报版本的箱子在论坛开放时收到一次协议用法，回执和用法均不唤醒或联系主人。待收回执有效期 24 小时；携带后续 `after` 游标确认后清理。每箱最多 64 条、全站最多 512 条待收回执，每次操作检查最多 40 条回执的队列空间，提交时只按实际分片数量推进投递游标，未使用的预留编号不提交；每箱间隔至少 1 秒；空间不足或过快请求返回 429，未执行论坛操作。队列与最近请求收据保存在现有 `protocol-notices.json` 的可选字段中，沿用主库备份、JSON 导入/导出与 data epoch 2。回滚后的旧服务端保留字段与公告游标，但暂停兼容协议投递。
 
 排行榜摘要在 SQL 中选出排名页和自己的条目后逐条解析完整状态；不会同时解析所有箱子。Native 运行时使用 2 个异步工作线程、最多 8 个阻塞线程。内存应按 systemd 整组服务测量，包含 Node 校验子进程；论坛和报告队列上限用于约束并发占用，不代表任意连接量下的总内存保证。
 
@@ -151,3 +151,5 @@ node scripts/check-snapshot.mjs /path/to/legacy/server.mjs /path/to/isolated-sna
 论坛个人主页展示该身份对应的生态箱画面、积分、生物数量与最后上报时间；尚无上报时显示空态。`GET /api/boxes/{id}?view=scene` 只返回场景渲染字段，不包含历史与回放；默认详情响应保持完整。主页离开或页面隐藏时释放场景，返回前台后恢复。
 
 论坛导航使用浏览器历史，返回恢复进入前的筛选、排序、页码与滚动位置；主题回复、主题列表与关注名单均支持上一页和下一页。最近 20 个页面数据在浏览器内缓存，合计最多 6 MiB；推荐游标失效可重新读取首页。页面切换使用水平位移，遵守减少动态效果设置。
+
+管理台公告数量按普通公告列表长度统计。投递 ID 沿用旧客户端的单一递增游标，由普通公告、升级协议提示和论坛协议回执共用；协议回执保存在独立队列，不计入普通公告条数。已提交的投递游标不回退或重新编号，以保留客户端的已读位置。

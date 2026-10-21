@@ -649,3 +649,123 @@ fn thread_opens_count_views_but_lists_and_reply_pages_do_not_and_backup_preserve
         1
     );
 }
+
+#[test]
+fn oldest_replies_paginate_by_creation_time_with_stable_ties_and_keep_legacy_order() {
+    let (_dir, s, a, b) = fixture();
+    s.update_named_control("forum", &json!({"enabled":true}), 0)
+        .unwrap();
+    run(
+        &s,
+        Method::POST,
+        "threads",
+        &[],
+        body("garden-a", "Opening"),
+        &a,
+        0,
+    )
+    .unwrap();
+    for (id, token, time, text) in [
+        ("garden-b", &b, 30000, "Later"),
+        ("garden-a", &a, 10000, "First"),
+        ("garden-a", &a, 20000, "Second"),
+        ("garden-a", &a, 30000, "Same time"),
+    ] {
+        run(
+            &s,
+            Method::POST,
+            "threads/1/replies",
+            &[],
+            body(id, text),
+            token,
+            time,
+        )
+        .unwrap();
+    }
+    let page = run(
+        &s,
+        Method::GET,
+        "threads/1",
+        &[("order", "oldest"), ("limit", "2")],
+        Value::Null,
+        "",
+        40000,
+    )
+    .unwrap();
+    assert_eq!(
+        page["replies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["body"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["First", "Second"]
+    );
+    assert_eq!(page["nextCursor"], 4);
+    assert_eq!(page["thread"]["views"], 1);
+    run(
+        &s,
+        Method::POST,
+        "threads/1/replies",
+        &[],
+        body("garden-a", "Newest"),
+        &a,
+        40000,
+    )
+    .unwrap();
+    let page = run(
+        &s,
+        Method::GET,
+        "threads/1",
+        &[("order", "oldest"), ("limit", "2"), ("after", "4")],
+        Value::Null,
+        "",
+        40000,
+    )
+    .unwrap();
+    assert_eq!(
+        page["replies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["body"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["Later", "Same time"]
+    );
+    assert_eq!(page["nextCursor"], 5);
+    assert_eq!(page["thread"]["views"], 1);
+    let page = run(
+        &s,
+        Method::GET,
+        "threads/1",
+        &[("order", "oldest"), ("after", "5")],
+        Value::Null,
+        "",
+        40000,
+    )
+    .unwrap();
+    assert_eq!(page["replies"][0]["body"], "Newest");
+    assert!(page["nextCursor"].is_null());
+    let legacy = run(
+        &s,
+        Method::GET,
+        "threads/1",
+        &[("limit", "2")],
+        Value::Null,
+        "",
+        40000,
+    )
+    .unwrap();
+    assert_eq!(legacy["replies"][0]["body"], "Newest");
+    assert_eq!(legacy["replies"][1]["body"], "Same time");
+    for query in [
+        vec![("order", "oldest"), ("after", "1")],
+        vec![("order", "oldest"), ("before", "5")],
+        vec![("order", "invalid")],
+    ] {
+        err(
+            run(&s, Method::GET, "threads/1", &query, Value::Null, "", 40000),
+            400,
+        );
+    }
+}

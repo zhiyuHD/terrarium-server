@@ -338,14 +338,39 @@ fn execute_raw(
             let mut root = post(&conn, id)?
                 .filter(|p| p["thread"].is_null())
                 .ok_or_else(|| OperationError::new(404, "Thread not found"))?;
-            if !query.contains_key("before") {
+            let oldest = match query.get("order").map(String::as_str).unwrap_or("latest") {
+                "oldest" => true,
+                "latest" => false,
+                _ => return reject(400, "Invalid reply order"),
+            };
+            let mut rows: Vec<Value> = if oldest {
+                if query.contains_key("before") {
+                    return reject(400, "Oldest replies use after pagination");
+                }
+                let after = number(query, "after", 0, i64::MAX)?;
+                let created = if after == 0 {
+                    i64::MIN
+                } else {
+                    conn.query_row(
+                        "SELECT created FROM posts WHERE thread=?1 AND id=?2",
+                        params![id, after],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .optional()?
+                    .ok_or_else(|| OperationError::new(400, "Invalid reply cursor"))?
+                };
+                let mut stmt=conn.prepare("SELECT p.id,p.thread,p.author,p.title,p.body,p.created,(SELECT count(*) FROM likes WHERE post=p.id),0,0 FROM posts p WHERE thread=?1 AND (created>?2 OR (created=?2 AND id>?3)) ORDER BY created,id LIMIT ?4")?;
+                stmt.query_map(params![id, created, after, limit + 1], row)?
+                    .collect::<rusqlite::Result<_>>()?
+            } else {
+                let mut stmt=conn.prepare("SELECT p.id,p.thread,p.author,p.title,p.body,p.created,(SELECT count(*) FROM likes WHERE post=p.id),0,0 FROM posts p WHERE thread=?1 AND id<?2 ORDER BY id DESC LIMIT ?3")?;
+                stmt.query_map(params![id, before, limit + 1], row)?
+                    .collect::<rusqlite::Result<_>>()?
+            };
+            if !query.contains_key("before") && !query.contains_key("after") {
                 // Reserved activity rows store counters; real author actions store timestamps.
                 root["views"] = json!(conn.query_row("INSERT INTO activity(author,action,at) VALUES(?1,'views',1) ON CONFLICT(author,action) DO UPDATE SET at=min(at+1,9007199254740991) RETURNING at", [format!("@thread:{id}")], |r| r.get::<_,i64>(0))?);
             }
-            let mut stmt=conn.prepare("SELECT p.id,p.thread,p.author,p.title,p.body,p.created,(SELECT count(*) FROM likes WHERE post=p.id),0,0 FROM posts p WHERE thread=?1 AND id<?2 ORDER BY id DESC LIMIT ?3")?;
-            let mut rows: Vec<Value> = stmt
-                .query_map(params![id, before, limit + 1], row)?
-                .collect::<rusqlite::Result<_>>()?;
             let more = rows.len() > limit as usize;
             rows.truncate(limit as usize);
             return Ok(

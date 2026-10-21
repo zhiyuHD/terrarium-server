@@ -281,6 +281,11 @@ fn allocate(conn: &Connection, count: usize) -> Result<u64> {
     save_document(conn, "announcements.json", &doc)?;
     Ok(start)
 }
+fn finish_allocation(conn: &Connection, first: u64, used: usize) -> Result<()> {
+    let mut doc = document(conn, "announcements.json")?.unwrap();
+    doc["nextId"] = json!(first + used as u64);
+    save_document(conn, "announcements.json", &doc)
+}
 fn parts(payload: &Value) -> Vec<String> {
     let text = payload.to_string();
     let mut chunks = Vec::new();
@@ -306,7 +311,7 @@ fn queue(
     request: &str,
     payload: &Value,
     now: i64,
-) -> Result<()> {
+) -> Result<usize> {
     let chunks = parts(payload);
     ensure!(
         chunks.len() <= RESERVE,
@@ -323,7 +328,7 @@ fn queue(
         );
         pending_mut(client).push(json!({"id":first+part as u64,"title":"论坛协议回执","text":text,"targets":[id],"createdAt":iso(now),"expiresAt":iso(now+TTL_MS)}));
     }
-    Ok(())
+    Ok(chunks.len())
 }
 
 pub fn submit(
@@ -365,7 +370,8 @@ pub fn submit(
             Ok(data)=>json!({"action":action,"ok":true,"data":data,"externalContent":true}),
             Err(e)=>{let e=e.downcast_ref::<OperationError>();json!({"action":action,"ok":false,"status":e.map_or(500,|e|e.status),"error":e.map_or("Forum operation failed",|e|e.message.as_str())})}
         };
-        queue(client,id,first,&request,&payload,now)?;
+        let used=queue(client,id,first,&request,&payload,now)?;
+        finish_allocation(tx,first,used)?;
         client["forumRequestAtMs"]=json!(now);
         if let Ok(c)=&command && c.request.is_some() {
             if client.get("forumRequests").is_none() {client["forumRequests"]=json!([]);}
@@ -401,7 +407,7 @@ pub fn prepare_poll(store: &Store, id: &str, version: &Value, after: u64, now: i
                 let client = client_mut(&mut all, id);
                 if pending_mut(client).len() + RESERVE <= MAX_PER_BOX {
                     let first = allocate(tx, RESERVE)?;
-                    queue(
+                    let used = queue(
                         client,
                         id,
                         first,
@@ -409,6 +415,7 @@ pub fn prepare_poll(store: &Store, id: &str, version: &Value, after: u64, now: i
                         &json!({"action":"help","ok":true,"data":{"help":HELP}}),
                         now,
                     )?;
+                    finish_allocation(tx, first, used)?;
                     client["forumHelpSent"] = json!(true);
                 }
             }

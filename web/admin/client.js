@@ -231,11 +231,12 @@ function renderFeedback() {
   if (!list.children.length) list.append(node("div", "\u6682\u65E0\u53CD\u9988", "card empty"));
 }
 function renderNotices() {
+  el("notice-count").textContent = `${notices.length} 条`;
   const list = el("notice-list");
   list.replaceChildren();
   for (const notice of [...notices].reverse()) {
     const card = node("article", "", "card");
-    card.append(node("h3", `#${notice.id} ${notice.title || "\u65E0\u6807\u9898"}`), node("p", notice.text, "wrap"), node("p", notice.targets === "all" ? "\u5E7F\u64AD \xB7 \u516C\u7F51\u53EF\u89C1" : `\u5B9A\u5411\uFF1A${notice.targets.map((id) => snapshot?.boxes.find((box) => box.id === id)?.name ?? id).join("\u3001")}`, "small muted wrap"), node("p", `${date(notice.createdAt)} \u81F3 ${date(notice.expiresAt)}${Date.parse(notice.expiresAt) <= Date.now() ? " \xB7 \u5DF2\u8FC7\u671F" : ""}`, "small muted"));
+    card.append(node("h3", `投递 ID #${notice.id} ${notice.title || "\u65E0\u6807\u9898"}`), node("p", notice.text, "wrap"), node("p", notice.targets === "all" ? "\u5E7F\u64AD \xB7 \u516C\u7F51\u53EF\u89C1" : `\u5B9A\u5411\uFF1A${notice.targets.map((id) => snapshot?.boxes.find((box) => box.id === id)?.name ?? id).join("\u3001")}`, "small muted wrap"), node("p", `${date(notice.createdAt)} \u81F3 ${date(notice.expiresAt)}${Date.parse(notice.expiresAt) <= Date.now() ? " \xB7 \u5DF2\u8FC7\u671F" : ""}`, "small muted"));
     card.append(button("\u64A4\u56DE", () => confirmAction(`\u64A4\u56DE\u516C\u544A #${notice.id}`, `${notice.title}
 \u5BA2\u6237\u7AEF\u5C06\u4E0D\u518D\u62C9\u53D6\u6B64\u516C\u544A\uFF0C\u5DF2\u8FDB\u5165\u6A21\u578B\u4E0A\u4E0B\u6587\u7684\u4E8B\u4EF6\u4ECD\u7136\u4FDD\u7559\u3002`, async () => {
       await api(`announcements/${notice.id}`, "DELETE");

@@ -489,3 +489,66 @@ fn legacy_read_supports_recommendation_and_keeps_feedback_empty() {
             .is_empty()
     );
 }
+
+#[test]
+fn protocol_commands_commit_only_used_ids_and_do_not_create_regular_announcements() {
+    let (_dir, s, a, _) = fixture();
+    let original = s
+        .publish_announcement(&json!({"text":"Garden update"}), 1000)
+        .unwrap();
+    let mut cursor = original["id"].as_u64().unwrap();
+    for (i, text) in [
+        "[help]",
+        "[read]",
+        "[send][title]New leaf[content]A seedling",
+        "[read][thread]1",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let now = 2000 + i as i64 * 1001;
+        forum_bridge::prepare_poll(&s, "garden-a", &json!("0.8.7"), cursor, now).unwrap();
+        let receipt = command(&s, &a, text, now);
+        let pending = s.observed_client("garden-a").unwrap();
+        let parts = pending["forumReplies"].as_array().unwrap();
+        assert!(!parts.is_empty());
+        assert_eq!(receipt["id"], cursor + 1);
+        for (n, part) in parts.iter().enumerate() {
+            assert_eq!(part["id"], cursor + 1 + n as u64);
+        }
+        let page = s
+            .announcement_page(Some("garden-a"), cursor, false, None, now)
+            .unwrap();
+        assert_eq!(page["nextCursor"], cursor + parts.len() as u64);
+        cursor = page["nextCursor"].as_u64().unwrap();
+        assert_eq!(
+            s.list_announcements().unwrap()["announcements"],
+            json!([original])
+        );
+    }
+    let next = s
+        .publish_announcement(&json!({"text":"Next update"}), 10000)
+        .unwrap();
+    assert_eq!(next["id"], cursor + 1);
+}
+#[test]
+fn automatic_help_keeps_existing_high_cursors_and_uses_only_actual_parts() {
+    let (dir, s, _, _) = fixture();
+    s.publish_announcement(&json!({"text":"Garden update"}), 1000)
+        .unwrap();
+    let c = rusqlite::Connection::open(dir.path().join("data.sqlite")).unwrap();
+    c.execute("UPDATE legacy_documents SET content=CAST(json_set(content,'$.nextId',22227) AS BLOB) WHERE name='announcements.json'",[]).unwrap();
+    forum_bridge::prepare_poll(&s, "garden-a", &json!("0.8.6"), 22226, 2000).unwrap();
+    let pending = s.observed_client("garden-a").unwrap();
+    let parts = pending["forumReplies"].as_array().unwrap();
+    assert!(!parts.is_empty());
+    assert_eq!(parts[0]["id"], 22227);
+    let page = s
+        .announcement_page(Some("garden-a"), 22226, false, None, 2000)
+        .unwrap();
+    assert_eq!(page["nextCursor"], 22226 + parts.len() as u64);
+    let next = s
+        .publish_announcement(&json!({"text":"Next update"}), 3000)
+        .unwrap();
+    assert_eq!(next["id"], 22227 + parts.len() as u64);
+}
