@@ -154,6 +154,9 @@ impl Store {
             .lock()
             .map_err(|_| anyhow::anyhow!("Database writer lock poisoned"))
     }
+    pub fn forum_path(&self) -> PathBuf {
+        self.path.with_extension("forum.sqlite")
+    }
     pub fn reader(&self) -> Result<Connection> {
         let conn = Connection::open_with_flags(&self.path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         conn.busy_timeout(Duration::from_secs(5))?;
@@ -266,7 +269,7 @@ impl Store {
     pub fn ranked(&self, kind: Option<&str>) -> Result<Vec<Value>> {
         let conn = self.reader()?;
         let mut stmt = conn.prepare(
-            "SELECT entry,score FROM boxes WHERE (?1 IS NULL OR kind=?1) ORDER BY score DESC,id_sort",
+            "SELECT entry,score FROM boxes WHERE (?1 IS NULL OR kind=?1) ORDER BY score DESC,id_sort LIMIT 100",
         )?;
         let rows = stmt.query_map([kind], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?))
@@ -278,6 +281,39 @@ impl Store {
             Ok(entry)
         })
         .collect()
+    }
+    pub fn summary(&self, kind: &str, limit: usize, own: Option<&str>) -> Result<Value> {
+        let mut conn = self.reader()?;
+        let tx = conn.transaction()?;
+        let total: i64 = tx.query_row("SELECT count(*) FROM boxes WHERE kind=?1", [kind], |r| {
+            r.get(0)
+        })?;
+        let mut stmt=tx.prepare("WITH ranks AS (SELECT id,row_number() OVER(ORDER BY score DESC,id_sort) position,rank() OVER(ORDER BY score DESC) competitive FROM boxes WHERE kind=?1) SELECT b.entry,b.score,r.position,r.competitive FROM ranks r JOIN boxes b ON b.id=r.id WHERE r.position<=?2 OR b.id=?3 ORDER BY r.position")?;
+        let rows = stmt.query_map(params![kind, limit as i64, own], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, f64>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
+        })?;
+        let mut entries = Vec::new();
+        let mut mine = Value::Null;
+        for row in rows {
+            let (text, score, rank, competitive) = row?;
+            let entry: Value = serde_json::from_str(&text)?;
+            let mut summary = serde_json::json!({"rank":rank,"competitiveRank":competitive,"id":entry["id"],"score":score,"scoreParts":crate::scoring::score_parts(&entry["state"])?,"reportedAt":entry["reportedAt"]});
+            if let Some(name) = entry["state"].get("name") {
+                summary["name"] = name.clone();
+            }
+            if own.is_some_and(|id| entry["id"] == id) {
+                mine = summary.clone();
+            }
+            if rank <= limit as i64 {
+                entries.push(summary);
+            }
+        }
+        Ok(serde_json::json!({"habitat":kind,"total":total,"entries":entries,"own":mine}))
     }
     pub fn gallery(
         &self,

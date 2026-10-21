@@ -36,6 +36,12 @@ enum Command {
         #[arg(long)]
         output: PathBuf,
     },
+    BackupForum {
+        #[arg(long)]
+        database: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
     Check {
         #[arg(long)]
         database: PathBuf,
@@ -69,8 +75,15 @@ enum Command {
         admin_cidr: Option<String>,
     },
 }
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .max_blocking_threads(8)
+        .enable_all()
+        .build()?
+        .block_on(run())
+}
+async fn run() -> Result<()> {
     let command = Cli::parse()
         .command
         .map(Ok)
@@ -94,6 +107,10 @@ async fn main() -> Result<()> {
         Command::ExportLegacy { database, output } => {
             Store::existing(database)?.export(&output)?;
             println!("exported");
+        }
+        Command::BackupForum { database, output } => {
+            terrarium_server::forum::backup(&Store::existing(database)?, &output)?;
+            println!("backed up forum");
         }
         Command::Backup { database, output } => {
             Store::existing(database)?.backup(&output)?;

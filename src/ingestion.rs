@@ -7,7 +7,10 @@ use crate::{
 };
 use serde_json::{Value, json};
 use std::sync::Arc;
+use std::sync::LazyLock;
 use tokio::sync::Semaphore;
+pub static REPORT_BUFFERS: LazyLock<Arc<Semaphore>> =
+    LazyLock::new(|| Arc::new(Semaphore::new(24 * 1024 * 1024)));
 
 #[derive(Clone)]
 pub struct Ingestion {
@@ -65,7 +68,7 @@ impl Ingestion {
         Self {
             store,
             validator: LegacyValidator::default(),
-            pending: Arc::new(Semaphore::new(32)),
+            pending: Arc::new(Semaphore::new(4)),
             metrics: Arc::new(crate::metrics::Metrics::default()),
         }
     }

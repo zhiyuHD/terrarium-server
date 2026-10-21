@@ -233,6 +233,8 @@ async fn dispatch(
         path.as_str(),
         "/api/admin/boxes"
             | "/api/admin/controls"
+            | "/api/admin/controls/logo"
+            | "/api/admin/controls/forum"
             | "/api/admin/controls/http-push"
             | "/api/admin/controls/minimum-client-version"
             | "/api/admin/feedback"
@@ -281,12 +283,25 @@ async fn dispatch(
     match (method, path.as_str()) {
         (
             Method::PUT,
-            "/api/admin/controls/http-push" | "/api/admin/controls/minimum-client-version",
+            "/api/admin/controls/http-push"
+            | "/api/admin/controls/minimum-client-version"
+            | "/api/admin/controls/logo"
+            | "/api/admin/controls/forum",
         ) => {
             let input = body(request, 1024, "Control too large").await?;
-            let http = path.ends_with("/http-push");
-            let controls =
-                operation(store, move |s| s.update_control(http, &input, now_ms())).await?;
+            let key = if path.ends_with("/http-push") {
+                "httpPush"
+            } else if path.ends_with("/forum") {
+                "forum"
+            } else if path.ends_with("/logo") {
+                "logo"
+            } else {
+                "minimumClientVersion"
+            };
+            let controls = operation(store, move |s| {
+                s.update_named_control(key, &input, now_ms())
+            })
+            .await?;
             Ok(Json(controls).into_response())
         }
         (Method::POST, "/api/admin/announcements") => {

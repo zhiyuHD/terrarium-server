@@ -849,3 +849,85 @@ fn concurrent_admin_announcements_and_protocol_notices_allocate_unique_persisted
         6
     );
 }
+
+#[tokio::test]
+async fn forum_and_logo_controls_require_admin_and_support_immediate_schedule_and_cancel() {
+    let (_dir, s) = fixture();
+    let token = s.admin_token(false).unwrap();
+    let box_token = s.register(Some("garden-control")).unwrap().unwrap()["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let api = private(application(s.clone(), true));
+    for route in ["forum", "logo"] {
+        assert_eq!(
+            request(
+                api.clone(),
+                "PUT",
+                &format!("/api/admin/controls/{route}"),
+                json!({"enabled":true}),
+                Some(&box_token)
+            )
+            .await
+            .0,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    let future = iso(now_ms() + 60000);
+    for (route, key, input) in [
+        ("forum", "forum", json!({"enabled":true,"at":future})),
+        ("logo", "logo", json!({"version":"0.8.7","at":future})),
+    ] {
+        let (code, v) = request(
+            api.clone(),
+            "PUT",
+            &format!("/api/admin/controls/{route}"),
+            input,
+            Some(&token),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        assert!(!v[key]["scheduledChange"].is_null());
+        let (code, v) = request(
+            api.clone(),
+            "PUT",
+            &format!("/api/admin/controls/{route}"),
+            json!({"cancel":true}),
+            Some(&token),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        assert!(v[key]["scheduledChange"].is_null());
+    }
+    assert_eq!(
+        request(
+            api.clone(),
+            "PUT",
+            "/api/admin/controls/logo",
+            json!({"version":"9.9.9"}),
+            Some(&token)
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+    for (route, input) in [
+        ("forum", json!({"enabled":true})),
+        ("logo", json!({"version":"0.8.7"})),
+    ] {
+        assert_eq!(
+            request(
+                api.clone(),
+                "PUT",
+                &format!("/api/admin/controls/{route}"),
+                input,
+                Some(&token)
+            )
+            .await
+            .0,
+            StatusCode::OK
+        );
+    }
+    assert_eq!(s.controls(now_ms()).unwrap()["forum"]["enabled"], true);
+    assert_eq!(s.controls(now_ms()).unwrap()["logo"]["version"], "0.8.7");
+}

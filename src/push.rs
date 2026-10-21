@@ -107,9 +107,9 @@ async fn connection(
     {
         return;
     }
-    let permits = Arc::new(Semaphore::new(8));
-    let (reports, mut incoming) = mpsc::channel(8);
-    let (controls, mut commands) = mpsc::channel(8);
+    let permits = Arc::new(Semaphore::new(2));
+    let (reports, mut incoming) = mpsc::channel(2);
+    let (controls, mut commands) = mpsc::channel(2);
     let alive = Arc::new(AtomicBool::new(true));
     let reader_alive = alive.clone();
     let reader = tokio::spawn(async move {
@@ -125,7 +125,24 @@ async fn connection(
                             .await;
                         return;
                     };
-                    if reports.send((message, permit)).await.is_err() {
+                    let bytes = match &message {
+                        Message::Text(t) => t.len(),
+                        Message::Binary(b) => b.len(),
+                        _ => 0,
+                    };
+                    let Ok(buffer) = crate::ingestion::REPORT_BUFFERS
+                        .clone()
+                        .try_acquire_many_owned(bytes.max(1) as u32)
+                    else {
+                        let _ = controls
+                            .send(Message::Close(Some(CloseFrame {
+                                code: 1013,
+                                reason: "Report buffers are busy; retry later".into(),
+                            })))
+                            .await;
+                        return;
+                    };
+                    if reports.send((message, permit, buffer)).await.is_err() {
                         return;
                     }
                 }
@@ -161,7 +178,7 @@ async fn connection(
                 if !alive.swap(false,Ordering::Relaxed)||sink.send(Message::Ping(Vec::new().into())).await.is_err(){break;}
             },
             report=incoming.recv()=>{
-                let Some((message,_permit))=report else{break};
+                let Some((message,_permit,_buffer))=report else{break};
                 let text=match &message {Message::Text(t)=>Some(t.as_str()),_=>None};
                 let reply=session.receive(&ingestion,&id,text).await;
                 if sink.send(Message::Text(reply.to_string().into())).await.is_err(){break;}

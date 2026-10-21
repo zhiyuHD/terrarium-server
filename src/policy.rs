@@ -63,6 +63,28 @@ pub(crate) fn validate_document(name: &str, value: &Value) -> Result<()> {
                     && value["httpPush"]["enabled"].is_boolean(),
                 "Invalid HTTP Push controls"
             );
+            if let Some(logo) = value.get("logo") {
+                ensure!(
+                    matches!(logo["version"].as_str(), Some("0.8.6" | "0.8.7")),
+                    "Invalid logo version"
+                );
+                let schedule = &logo["scheduledChange"];
+                ensure!(
+                    schedule.is_null()
+                        || (matches!(schedule["version"].as_str(), Some("0.8.6" | "0.8.7"))
+                            && at(&schedule["at"]).is_some()),
+                    "Invalid logo schedule"
+                );
+            }
+            if let Some(forum) = value.get("forum") {
+                ensure!(forum["enabled"].is_boolean(), "Invalid forum control");
+                let scheduled = &forum["scheduledChange"];
+                ensure!(
+                    scheduled.is_null()
+                        || (scheduled["enabled"].is_boolean() && at(&scheduled["at"]).is_some()),
+                    "Invalid forum schedule"
+                );
+            }
             let scheduled = &value["httpPush"]["scheduledChange"];
             ensure!(
                 scheduled.is_null()
@@ -156,6 +178,18 @@ pub(crate) fn validate_document(name: &str, value: &Value) -> Result<()> {
 pub fn effective_controls(mut controls: Value, now: i64) -> Value {
     if controls.is_null() {
         controls = json!({"httpPush":{"enabled":true,"scheduledChange":null},"minimumClientVersion":{"version":null,"scheduledChange":null}});
+    }
+    if controls.get("logo").is_none() {
+        controls["logo"] = json!({"version":"0.8.6","scheduledChange":null});
+    }
+    if at(&controls["logo"]["scheduledChange"]["at"]).is_some_and(|at| at <= now) {
+        controls["logo"] = json!({"version":controls["logo"]["scheduledChange"]["version"],"scheduledChange":null});
+    }
+    if controls.get("forum").is_none() {
+        controls["forum"] = json!({"enabled":false,"scheduledChange":null});
+    }
+    if at(&controls["forum"]["scheduledChange"]["at"]).is_some_and(|at| at <= now) {
+        controls["forum"] = json!({"enabled":controls["forum"]["scheduledChange"]["enabled"],"scheduledChange":null});
     }
     if controls["httpPush"].get("scheduledChange").is_none() {
         controls["httpPush"]["scheduledChange"] = Value::Null;

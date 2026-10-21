@@ -208,6 +208,27 @@ impl Store {
     }
 
     pub fn update_control(&self, http: bool, input: &Value, now: i64) -> Result<Value> {
+        self.update_named_control(
+            if http {
+                "httpPush"
+            } else {
+                "minimumClientVersion"
+            },
+            input,
+            now,
+        )
+    }
+    pub fn update_named_control(&self, key: &str, input: &Value, now: i64) -> Result<Value> {
+        let http = matches!(key, "httpPush" | "forum");
+        if !matches!(key, "httpPush" | "minimumClientVersion" | "forum" | "logo") {
+            return reject(400, "Unknown control");
+        }
+        if key == "logo"
+            && input["cancel"] != true
+            && !matches!(input["version"].as_str(), Some("0.8.6" | "0.8.7"))
+        {
+            return reject(400, "Unknown logo version");
+        }
         self.transaction(|tx| {
             let mut controls = effective_controls(
                 document(tx, "controls.json")?.unwrap_or(Value::Null), now,
@@ -215,7 +236,6 @@ impl Store {
             let Some(object) = input.as_object() else {
                 return reject(400, "Invalid control");
             };
-            let key = if http { "httpPush" } else { "minimumClientVersion" };
             if input["cancel"] == true && object.len() == 1 {
                 controls[key]["scheduledChange"] = Value::Null;
             } else {

@@ -2,7 +2,6 @@ use crate::{
     ingestion::{Ingestion, database, now_ms},
     protocol::{MAX_BYTES, valid_id},
     push,
-    scoring::score_parts,
     store::Store,
 };
 use axum::{
@@ -24,15 +23,8 @@ pub struct App {
 }
 pub fn router(app: App) -> Router {
     Router::new()
-        .route(
-            "/",
-            get(|State(app): State<App>| async move {
-                Html(crate::assets::pin_public(
-                    include_str!("../web/index.html"),
-                    app.release_id.as_deref(),
-                ))
-            }),
-        )
+        .route("/", get(crate::presentation::index))
+        .route("/api/presentation", get(crate::presentation::status))
         .route(
             "/scene.js",
             get(|| async {
@@ -45,6 +37,12 @@ pub fn router(app: App) -> Router {
                 )
             }),
         )
+        .route(
+            "/forum",
+            get(|| async { Html(include_str!("../web/forum.html")) }),
+        )
+        .route("/api/forum/status", get(crate::forum::status))
+        .route("/api/forum/{*path}", any(crate::forum::handle))
         .route("/health", get(health))
         .route("/api/leaderboard", get(leaderboard))
         .route("/api/boxes/{id}", get(box_detail))
@@ -131,24 +129,49 @@ async fn leaderboard(
     if kind.as_ref().is_some_and(|v| v != "land" && v != "water") {
         return error(StatusCode::BAD_REQUEST, "Invalid box kind");
     }
-    let result=tokio::task::spawn_blocking(move||->anyhow::Result<Value>{
-        if query.get("view").is_some_and(|v|v=="gallery") {
-            let kind=kind.as_deref().ok_or_else(||anyhow::anyhow!("Gallery requires a box kind"))?;
-            let number=|key:&str,default:usize|->anyhow::Result<usize>{Ok(query.get(key).map(|v|v.parse()).transpose()?.unwrap_or(default))};
-            let page=number("page",1)?;let size=number("pageSize",4)?;let sort=query.get("sort").map(String::as_str).unwrap_or("score");let search=query.get("q").map(String::as_str).unwrap_or("").trim();
-            anyhow::ensure!(page>0&&page<=9_007_199_254_740_991&&(1..=12).contains(&size)&&matches!(sort,"score"|"recent")&&search.encode_utf16().count()<=100,"Invalid gallery pagination, sort or search");
-            return app.store.gallery(kind,search,sort=="recent",page,size);
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Value> {
+        if query.get("view").is_some_and(|v| v == "gallery") {
+            let kind = kind
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("Gallery requires a box kind"))?;
+            let number = |key: &str, default: usize| -> anyhow::Result<usize> {
+                Ok(query
+                    .get(key)
+                    .map(|v| v.parse())
+                    .transpose()?
+                    .unwrap_or(default))
+            };
+            let page = number("page", 1)?;
+            let size = number("pageSize", 4)?;
+            let sort = query.get("sort").map(String::as_str).unwrap_or("score");
+            let search = query.get("q").map(String::as_str).unwrap_or("").trim();
+            anyhow::ensure!(
+                page > 0
+                    && page <= 9_007_199_254_740_991
+                    && (1..=12).contains(&size)
+                    && matches!(sort, "score" | "recent")
+                    && search.encode_utf16().count() <= 100,
+                "Invalid gallery pagination, sort or search"
+            );
+            return app
+                .store
+                .gallery(kind, search, sort == "recent", page, size);
         }
-        let entries=app.store.ranked(kind.as_deref())?;
-        if query.get("view").is_some_and(|v|v=="summary") {
-            let kind=kind.ok_or_else(||anyhow::anyhow!("Summary requires kind"))?;
-            let limit=query.get("limit").map(|v|v.parse::<usize>()).transpose()?.unwrap_or(20);anyhow::ensure!((1..=100).contains(&limit),"Invalid summary limit");
-            let summarize=|i:usize|->anyhow::Result<Value>{let entry=&entries[i];let mut row=json!({"rank":i+1,"competitiveRank":entries.iter().position(|e|e["score"]==entry["score"]).unwrap()+1,"id":entry["id"],"score":entry["score"],"scoreParts":score_parts(&entry["state"])?,"reportedAt":entry["reportedAt"]});if let Some(name)=entry["state"].get("name"){row["name"]=name.clone();}Ok(row)};
-            let own=query.get("ownId").and_then(|id|entries.iter().position(|e|e["id"]==*id)).map(summarize).transpose()?;
-            return Ok(json!({"habitat":kind,"total":entries.len(),"entries":(0..entries.len().min(limit)).map(summarize).collect::<anyhow::Result<Vec<_>>>()?,"own":own}));
+        if query.get("view").is_some_and(|v| v == "summary") {
+            let kind = kind.ok_or_else(|| anyhow::anyhow!("Summary requires kind"))?;
+            let limit = query
+                .get("limit")
+                .map(|v| v.parse::<usize>())
+                .transpose()?
+                .unwrap_or(20);
+            anyhow::ensure!((1..=100).contains(&limit), "Invalid summary limit");
+            return app
+                .store
+                .summary(&kind, limit, query.get("ownId").map(String::as_str));
         }
-        Ok(Value::Array(entries.into_iter().take(100).collect()))
-    }).await;
+        Ok(Value::Array(app.store.ranked(kind.as_deref())?))
+    })
+    .await;
     match result {
         Ok(Ok(value)) => Json(value).into_response(),
         Ok(Err(_)) => error(StatusCode::BAD_REQUEST, "Invalid leaderboard request"),
@@ -196,6 +219,15 @@ async fn register(State(app): State<App>, request: Request) -> Response {
 async fn report(State(app): State<App>, headers: HeaderMap, request: Request) -> Response {
     let Some(ingestion) = app.ingestion else {
         return error(StatusCode::NOT_IMPLEMENTED, "Write preview is disabled");
+    };
+    let Ok(_buffer) = crate::ingestion::REPORT_BUFFERS
+        .clone()
+        .try_acquire_many_owned(MAX_BYTES as u32)
+    else {
+        return error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Report buffers are busy; retry later",
+        );
     };
     let body = match to_bytes(request.into_body(), MAX_BYTES).await {
         Ok(b) => b,
