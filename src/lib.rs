@@ -20,3 +20,5 @@ pub mod forum_bridge;
 pub mod presentation;
 
 pub mod story;
+
+mod forum_recommendation;

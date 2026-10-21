@@ -514,3 +514,138 @@ async fn public_routes_enforce_closed_gate_authentication_and_body_limit() {
     assert_eq!(v["logoVersion"], "0.8.6");
     assert!(v["logo"].as_str().unwrap().contains("闲看生机"));
 }
+
+#[test]
+fn recommendations_preserve_pages_during_engagement_and_expire_with_refresh() {
+    let (_dir, s, a, b) = fixture();
+    s.update_named_control("forum", &json!({"enabled":true}), 0)
+        .unwrap();
+    for (n, t) in [(1, 0), (2, 60000), (3, 120000)] {
+        run(
+            &s,
+            Method::POST,
+            "threads",
+            &[],
+            body("garden-a", &format!("leaf {n}")),
+            &a,
+            t,
+        )
+        .unwrap();
+    }
+    run(
+        &s,
+        Method::PUT,
+        "likes",
+        &[],
+        json!({"id":"garden-b","clientVersion":"0.8.7","postId":1,"liked":true}),
+        &b,
+        120001,
+    )
+    .unwrap();
+    let q = [("sort", "recommended"), ("limit", "1")];
+    let first = run(&s, Method::GET, "threads", &q, Value::Null, "", 120002).unwrap();
+    assert_eq!(first["threads"][0]["id"], 1);
+    let cursor = first["nextCursor"].as_i64().unwrap().to_string();
+    run(
+        &s,
+        Method::POST,
+        "threads",
+        &[],
+        body("garden-a", "new arrival"),
+        &a,
+        180000,
+    )
+    .unwrap();
+    run(
+        &s,
+        Method::PUT,
+        "likes",
+        &[],
+        json!({"id":"garden-b","clientVersion":"0.8.7","postId":2,"liked":true}),
+        &b,
+        180001,
+    )
+    .unwrap();
+    let nextq = [
+        ("sort", "recommended"),
+        ("limit", "1"),
+        ("before", cursor.as_str()),
+    ];
+    let next = run(&s, Method::GET, "threads", &nextq, Value::Null, "", 180002).unwrap();
+    assert_eq!(next["threads"][0]["id"], 3);
+    let bad = [
+        ("sort", "recommended"),
+        ("author", "garden-b"),
+        ("before", cursor.as_str()),
+    ];
+    err(
+        run(&s, Method::GET, "threads", &bad, Value::Null, "", 180003),
+        400,
+    );
+    let latest = run(&s, Method::GET, "threads", &[], Value::Null, "", 180003).unwrap();
+    assert_eq!(latest["threads"][0]["id"], 4);
+    let refreshed = run(&s, Method::GET, "threads", &q, Value::Null, "", 180003).unwrap();
+    assert_eq!(refreshed["threads"][0]["id"], 2);
+    err(
+        run(&s, Method::GET, "threads", &nextq, Value::Null, "", 720002),
+        410,
+    );
+}
+#[test]
+fn thread_opens_count_views_but_lists_and_reply_pages_do_not_and_backup_preserves_them() {
+    let (dir, s, a, _) = fixture();
+    s.update_named_control("forum", &json!({"enabled":true}), 0)
+        .unwrap();
+    run(
+        &s,
+        Method::POST,
+        "threads",
+        &[],
+        body("garden-a", "leaf"),
+        &a,
+        0,
+    )
+    .unwrap();
+    assert_eq!(
+        run(&s, Method::GET, "threads", &[], Value::Null, "", 0).unwrap()["threads"][0]["views"],
+        0
+    );
+    assert_eq!(
+        run(&s, Method::GET, "threads/1", &[], Value::Null, "", 1).unwrap()["thread"]["views"],
+        1
+    );
+    assert_eq!(
+        run(
+            &s,
+            Method::GET,
+            "threads/1",
+            &[("before", "99")],
+            Value::Null,
+            "",
+            2
+        )
+        .unwrap()["thread"]["views"],
+        1
+    );
+    assert_eq!(
+        run(&s, Method::GET, "threads/1", &[], Value::Null, "", 3).unwrap()["thread"]["views"],
+        2
+    );
+    let path = dir.path().join("backup.sqlite");
+    forum::backup(&s, &path).unwrap();
+    let c = rusqlite::Connection::open(path).unwrap();
+    assert_eq!(
+        c.query_row(
+            "SELECT at FROM activity WHERE author='@thread:1' AND action='views'",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        2
+    );
+    assert_eq!(
+        c.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+}

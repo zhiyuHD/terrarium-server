@@ -139,14 +139,52 @@ fn text(input: &Value, key: &str, max: usize) -> Result<String> {
     };
     Ok(s.to_owned())
 }
-fn post(conn: &Connection, id: i64) -> Result<Option<Value>> {
-    Ok(conn.query_row("SELECT p.id,p.thread,p.author,p.title,p.body,p.created,(SELECT count(*) FROM likes WHERE post=p.id),(SELECT count(*) FROM posts WHERE thread=p.id) FROM posts p WHERE p.id=?1",[id],row).optional()?)
+pub(crate) fn post(conn: &Connection, id: i64) -> Result<Option<Value>> {
+    Ok(conn.query_row("SELECT p.id,p.thread,p.author,p.title,p.body,p.created,(SELECT count(*) FROM likes WHERE post=p.id),(SELECT count(*) FROM posts WHERE thread=p.id),coalesce((SELECT at FROM activity WHERE author='@thread:'||p.id AND action='views'),0) FROM posts p WHERE p.id=?1",[id],row).optional()?)
 }
 fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     Ok(
-        json!({"id":r.get::<_,i64>(0)?,"thread":r.get::<_,Option<i64>>(1)?,"author":r.get::<_,String>(2)?,"title":r.get::<_,String>(3)?,"body":r.get::<_,String>(4)?,"createdAt":iso(r.get(5)?),"likes":r.get::<_,i64>(6)?,"replies":r.get::<_,i64>(7)?}),
+        json!({"id":r.get::<_,i64>(0)?,"thread":r.get::<_,Option<i64>>(1)?,"author":r.get::<_,String>(2)?,"title":r.get::<_,String>(3)?,"body":r.get::<_,String>(4)?,"createdAt":iso(r.get(5)?),"likes":r.get::<_,i64>(6)?,"replies":r.get::<_,i64>(7)?,"views":r.get::<_,i64>(8)?}),
     )
 }
+pub(crate) fn thread_rows(
+    conn: &Connection,
+    query: &HashMap<String, String>,
+    before: i64,
+    limit: i64,
+) -> Result<Vec<Value>> {
+    let q = query.get("q").map(|s| s.trim()).unwrap_or("");
+    if q.encode_utf16().count() > 100 {
+        return reject(400, "Search query too long");
+    }
+    let author = query.get("author").map(String::as_str).unwrap_or("");
+    let following = query.get("followingOf").map(String::as_str).unwrap_or("");
+    let fts = q.chars().count() >= 3;
+    let term = format!("\"{}\"", q.replace('"', "\"\""));
+    let sql = format!(
+        "SELECT p.id,NULL,p.author,p.title,substr(p.body,1,240),p.created,(SELECT count(*) FROM likes WHERE post=p.id),(SELECT count(*) FROM posts WHERE thread=p.id),coalesce((SELECT at FROM activity WHERE author='@thread:'||p.id AND action='views'),0) FROM posts p WHERE p.thread IS NULL AND p.id<?1 AND (?2='' OR p.author=?2) AND (?3='' OR p.author IN(SELECT target FROM follows WHERE author=?3)) AND {} ORDER BY p.id DESC LIMIT ?5",
+        if fts {
+            "p.id IN(SELECT coalesce(found.thread,found.id) FROM post_search JOIN posts found ON found.id=post_search.rowid WHERE post_search MATCH ?4)"
+        } else {
+            "(?4='' OR p.id IN(SELECT coalesce(thread,id) FROM posts WHERE instr(lower(title||' '||body),lower(?4))>0))"
+        }
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows: Vec<Value> = stmt
+        .query_map(
+            params![
+                before,
+                author,
+                following,
+                if fts { &term } else { q },
+                limit
+            ],
+            row,
+        )?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
+}
+
 fn rate(conn: &Connection, author: &str, action: &str, now: i64, interval: i64) -> Result<()> {
     let last: Option<i64> = conn
         .query_row(
@@ -279,35 +317,14 @@ fn execute_raw(
         let limit = number(query, "limit", 5, 20)?.max(1);
         let before = number(query, "before", i64::MAX, i64::MAX)?;
         if path == "threads" {
-            let q = query.get("q").map(|s| s.trim()).unwrap_or("");
-            if q.encode_utf16().count() > 100 {
-                return reject(400, "Search query too long");
+            let sort = query.get("sort").map(String::as_str).unwrap_or("latest");
+            if sort == "recommended" {
+                return crate::forum_recommendation::page(store, &conn, query, before, limit, now);
             }
-            let author = query.get("author").map(String::as_str).unwrap_or("");
-            let following = query.get("followingOf").map(String::as_str).unwrap_or("");
-            let fts = q.chars().count() >= 3;
-            let term = format!("\"{}\"", q.replace('"', "\"\""));
-            let sql = format!(
-                "SELECT p.id,NULL,p.author,p.title,substr(p.body,1,240),p.created,(SELECT count(*) FROM likes WHERE post=p.id),(SELECT count(*) FROM posts WHERE thread=p.id) FROM posts p WHERE p.thread IS NULL AND p.id<?1 AND (?2='' OR p.author=?2) AND (?3='' OR p.author IN(SELECT target FROM follows WHERE author=?3)) AND {} ORDER BY p.id DESC LIMIT ?5",
-                if fts {
-                    "p.id IN(SELECT coalesce(found.thread,found.id) FROM post_search JOIN posts found ON found.id=post_search.rowid WHERE post_search MATCH ?4)"
-                } else {
-                    "(?4='' OR p.id IN(SELECT coalesce(thread,id) FROM posts WHERE instr(lower(title||' '||body),lower(?4))>0))"
-                }
-            );
-            let mut stmt = conn.prepare(&sql)?;
-            let mut rows: Vec<Value> = stmt
-                .query_map(
-                    params![
-                        before,
-                        author,
-                        following,
-                        if fts { &term } else { q },
-                        limit + 1
-                    ],
-                    row,
-                )?
-                .collect::<rusqlite::Result<_>>()?;
+            if sort != "latest" {
+                return reject(400, "Invalid forum sort");
+            }
+            let mut rows = thread_rows(&conn, query, before, limit + 1)?;
             let more = rows.len() > limit as usize;
             rows.truncate(limit as usize);
             return Ok(
@@ -318,10 +335,14 @@ fn execute_raw(
             .strip_prefix("threads/")
             .and_then(|s| s.parse::<i64>().ok())
         {
-            let root = post(&conn, id)?
+            let mut root = post(&conn, id)?
                 .filter(|p| p["thread"].is_null())
                 .ok_or_else(|| OperationError::new(404, "Thread not found"))?;
-            let mut stmt=conn.prepare("SELECT p.id,p.thread,p.author,p.title,p.body,p.created,(SELECT count(*) FROM likes WHERE post=p.id),0 FROM posts p WHERE thread=?1 AND id<?2 ORDER BY id DESC LIMIT ?3")?;
+            if !query.contains_key("before") {
+                // Reserved activity rows store counters; real author actions store timestamps.
+                root["views"] = json!(conn.query_row("INSERT INTO activity(author,action,at) VALUES(?1,'views',1) ON CONFLICT(author,action) DO UPDATE SET at=min(at+1,9007199254740991) RETURNING at", [format!("@thread:{id}")], |r| r.get::<_,i64>(0))?);
+            }
+            let mut stmt=conn.prepare("SELECT p.id,p.thread,p.author,p.title,p.body,p.created,(SELECT count(*) FROM likes WHERE post=p.id),0,0 FROM posts p WHERE thread=?1 AND id<?2 ORDER BY id DESC LIMIT ?3")?;
             let mut rows: Vec<Value> = stmt
                 .query_map(params![id, before, limit + 1], row)?
                 .collect::<rusqlite::Result<_>>()?;

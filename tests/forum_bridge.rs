@@ -471,3 +471,21 @@ fn full_thread_results_span_multiple_announcement_pages_without_losing_parts() {
     assert_eq!(results[0]["data"]["replies"].as_array().unwrap().len(), 3);
     assert_eq!(results[0]["data"]["thread"]["body"], "\\\"".repeat(2000));
 }
+
+#[test]
+fn legacy_read_supports_recommendation_and_keeps_feedback_empty() {
+    let (_dir, s, a, _) = fixture();
+    command(&s, &a, "[send][title]New leaf[content]A seedling", 1000);
+    let (_, cursor) = read(&s, "garden-a", 0, 1000);
+    command(&s, &a, "[read][q]leaf[sort]recommended[limit]1", 2001);
+    let (results, _) = read(&s, "garden-a", cursor, 2001);
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0]["data"]["sort"], "recommended");
+    assert_eq!(results[0]["data"]["threads"][0]["title"], "New leaf");
+    assert!(
+        s.list_feedback(0).unwrap()["feedback"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}

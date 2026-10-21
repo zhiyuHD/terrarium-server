@@ -1,4 +1,4 @@
-<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, web/forum.html, src/forum.rs, src/forum_bridge.rs, src/presentation.rs, src/story.rs -->
+<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, web/forum.html, src/forum.rs, src/forum_recommendation.rs, src/forum_bridge.rs, src/presentation.rs, src/story.rs -->
 # terrarium-server
 
 生态箱独立服务端，生产 HTTP/WS 与存储使用 Rust + SQLite。兼容现有 World 的 HTTP/WS 协议与 TS 存档，可通过 Native 原子发布控制器运行。公共接口仅监听回环地址，管理台使用独立私网端口。
@@ -94,8 +94,8 @@ node scripts/check-snapshot.mjs /path/to/legacy/server.mjs /path/to/isolated-sna
 
 `GET /api/forum/status` 返回开放状态。论坛默认关闭；`/forum` 公开页面只读，支持深色模式、搜索、分页、帖子与关注资料。其他论坛接口关闭时返回 HTTP 503、`code: forum_closed` 和“未开放论坛”，不创建论坛数据库。
 
-- `GET /api/forum/threads`：`q` 搜索主题及回复；`author`、`followingOf` 筛选作者或关注动态。默认 5 条，最多 20 条，`before=nextCursor` 读取下一页。
-- `GET /api/forum/threads/{id}`：原帖与倒序回复，采用相同分页参数。
+- `GET /api/forum/threads`：`q` 搜索主题及回复；`author`、`followingOf` 筛选作者或关注动态。默认按最新排序；`sort=recommended` 读取推荐，网页默认推荐并可切换最新。默认 5 条，最多 20 条，`before=nextCursor` 读取下一页。
+- `GET /api/forum/threads/{id}`：原帖与倒序回复，采用相同分页参数。成功打开首页增加一次浏览量，带 `before` 的回复分页不计数；浏览量指打开次数。
 - `GET /api/forum/profiles/{id}`：帖子数、关注数、粉丝数与分页关注名单，后续页传 `after=nextCursor`。
 - `POST /api/forum/threads`：`title`、`body` 发帖；`POST /api/forum/threads/{id}/replies`：`body` 回复。
 - `PUT /api/forum/likes`：`postId`、`liked`；`PUT /api/forum/follows`：`targetId`、`following`。相同目标值重复提交不增加计数。
@@ -143,3 +143,7 @@ node scripts/check-snapshot.mjs /path/to/legacy/server.mjs /path/to/isolated-sna
 配置与完成记录存为现有 `legacy_documents` 中的可选 `story.json`，不修改 SQLite schema 或 data epoch。主库在线备份和 JSON 导入/导出包含该文件；论坛回帖仍需另行 `backup-forum`。旧服务端会保留未知文档，TS 回滚时保留导出的 story.json，迁回 Rust 时重新导入。已有完成记录后不能切换主题，避免重复投递。
 
 `src/ingestion.rs` rejects snapshots over 31 days old or over 60 seconds in the future. Time errors include `stateUpdatedAtMs` and `serverAtMs`; these are separate from the 409 stale-report check against the previous accepted snapshot. Land and water use the same `/api/reports/ws` handler.
+
+推荐分为 `100 × (1 − max(0, 已发布小时数) ÷ 24) + 8 × min(点赞数,20) ÷ 20 + 6 × min(回复数,20) ÷ 20 + 3 × min(浏览数,100) ÷ 100`。时间分连续下降，满 24 小时为零，之后为负；互动合计最多 17 分。推荐候选为筛选后最近 2000 个主题。同分按帖子 ID 倒序。推荐分页固定本次排序，使用返回的数字游标并保持筛选与 `sort`；最多缓存 64 组 ID 列表，10 分钟过期或服务重启、缓存淘汰后返回 410，需重新读取首页。兼容反馈命令支持 `[read][sort]recommended`。
+
+浏览计数保存在现有 `activity` 表的 `author=@thread:<id>, action=views` 保留命名空间，`at` 为计数；其他动作的 `at` 仍为限流时间戳。无需变更存储版本，论坛备份保留计数，旧服务忽略该命名空间。
