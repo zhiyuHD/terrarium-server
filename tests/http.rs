@@ -107,3 +107,55 @@ async fn serves_global_pagination_search_summary_replays_and_rejects_writes() {
     assert_eq!(health["readOnly"], true);
     assert_eq!(health["releaseId"], "fixture");
 }
+
+#[tokio::test]
+async fn scene_details_render_land_and_water_without_history_or_replay_payloads() {
+    let dir = TempDir::new().unwrap();
+    let store = Store::open(dir.path().join("data.sqlite")).unwrap();
+    let cases: Vec<Value> = serde_json::from_str(include_str!("fixtures/scores.json")).unwrap();
+    for (n, kind) in [(0, "land"), (1, "water")] {
+        let id = format!("scene-{kind}");
+        let mut state = cases[n]["state"].clone();
+        state["history"] = json!([{"test":"history"}]);
+        state["replays"] = json!([{"test":"replay"}]);
+        let entry = json!({"id":id,"kind":kind,"state":state,"phase":"night","reportedAt":"2026-10-20T00:00:00Z","reportRevision":"fixture"});
+        assert!(store.commit_entry(&entry, None).unwrap());
+    }
+    let app = router(App {
+        store,
+        release_id: None,
+        release_root: None,
+        ingestion: None,
+    });
+    for kind in ["land", "water"] {
+        let path = format!("/api/boxes/scene-{kind}");
+        let (status, full) = query(app.clone(), &path).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(full["state"]["history"][0]["test"], "history");
+        let (status, scene) = query(app.clone(), &(path + "?view=scene")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(scene["kind"], kind);
+        assert_eq!(scene["score"], full["score"]);
+        assert_eq!(scene["phase"], "night");
+        assert_eq!(scene["replayCount"], 1);
+        assert!(scene["state"].get("history").is_none());
+        assert!(scene["state"].get("replays").is_none());
+        for field in if kind == "water" {
+            vec!["plants", "fish", "oxygen", "cleanliness"]
+        } else {
+            vec!["plants", "bugs", "soil"]
+        } {
+            assert_eq!(scene["state"][field], full["state"][field]);
+        }
+        let (_, gallery) = query(
+            app.clone(),
+            &format!("/api/leaderboard?view=gallery&kind={kind}"),
+        )
+        .await;
+        assert_eq!(scene["state"], gallery["entries"][0]["state"]);
+    }
+    assert_eq!(
+        query(app, "/api/boxes/missing?view=scene").await.0,
+        StatusCode::NOT_FOUND
+    );
+}

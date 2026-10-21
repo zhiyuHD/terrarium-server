@@ -344,13 +344,31 @@ impl Store {
             "WITH ranked AS (SELECT *,row_number() OVER(ORDER BY score DESC,id_sort) rank FROM boxes WHERE kind=?1) SELECT entry,score,rank FROM ranked WHERE instr(search,?2)>0 ORDER BY {order} LIMIT ?3 OFFSET ?4"
         );
         let mut stmt = tx.prepare(&sql)?;
-        let entries=stmt.query_map(params![kind,query.to_lowercase(),size as i64,((page-1)*size) as i64],|r|Ok((r.get::<_,String>(0)?,r.get::<_,f64>(1)?,r.get::<_,i64>(2)?)))?.map(|row|->Result<Value>{
-            let(text,score,rank)=row?;let entry:Value=serde_json::from_str(&text)?;let state=&entry["state"];
-            let fields=if kind=="water" {vec!["name","progression","facilities","plants","kind","oxygen","cleanliness","fish","food"]} else {vec!["name","progression","facilities","plants","soil","seeds","bugs","items","nests","eggs","food","webs"]};
-            let compact=fields.into_iter().filter_map(|key|state.get(key).map(|v|(key.to_string(),v.clone()))).collect::<serde_json::Map<_,_>>();
-            let mut result=serde_json::json!({"id":entry["id"],"kind":kind,"rank":rank,"score":score,"reportedAt":entry["reportedAt"],"replayCount":state["replays"].as_array().map_or(0,Vec::len),"state":compact});
-            if let Some(phase)=entry.get("phase"){result["phase"]=phase.clone();}Ok(result)
-        }).collect::<Result<Vec<_>>>()?;
+        let entries = stmt
+            .query_map(
+                params![
+                    kind,
+                    query.to_lowercase(),
+                    size as i64,
+                    ((page - 1) * size) as i64
+                ],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, f64>(1)?,
+                        r.get::<_, i64>(2)?,
+                    ))
+                },
+            )?
+            .map(|row| -> Result<Value> {
+                let (text, score, rank) = row?;
+                let entry: Value = serde_json::from_str(&text)?;
+                let mut result = scene_entry(&entry);
+                result["rank"] = serde_json::json!(rank);
+                result["score"] = serde_json::json!(score);
+                Ok(result)
+            })
+            .collect::<Result<Vec<_>>>()?;
         Ok(
             serde_json::json!({"page":page,"pageSize":size,"pages":pages,"total":total,"counts":{"boxes":counts.0,"plants":counts.1,"animals":counts.2},"entries":entries}),
         )
@@ -482,4 +500,47 @@ pub(crate) fn document(conn: &Connection, name: &str) -> Result<Option<Value>> {
 pub(crate) fn save_document(conn: &Connection, name: &str, value: &Value) -> Result<()> {
     conn.execute("INSERT INTO legacy_documents VALUES(?1,?2) ON CONFLICT(name) DO UPDATE SET content=excluded.content",params![name,serde_json::to_vec(value)?])?;
     Ok(())
+}
+
+/// Public rendering fields exclude history and replay payloads.
+pub(crate) fn scene_entry(entry: &Value) -> Value {
+    let state = &entry["state"];
+    let water = entry["kind"] == "water";
+    let fields = if water {
+        vec![
+            "name",
+            "progression",
+            "facilities",
+            "plants",
+            "kind",
+            "oxygen",
+            "cleanliness",
+            "fish",
+            "food",
+        ]
+    } else {
+        vec![
+            "name",
+            "progression",
+            "facilities",
+            "plants",
+            "soil",
+            "seeds",
+            "bugs",
+            "items",
+            "nests",
+            "eggs",
+            "food",
+            "webs",
+        ]
+    };
+    let compact = fields
+        .into_iter()
+        .filter_map(|key| state.get(key).map(|v| (key.to_string(), v.clone())))
+        .collect::<serde_json::Map<_, _>>();
+    let mut result = serde_json::json!({"id":entry["id"],"kind":entry["kind"],"score":entry["score"],"reportedAt":entry["reportedAt"],"replayCount":state["replays"].as_array().map_or(0,Vec::len),"state":compact});
+    if let Some(phase) = entry.get("phase") {
+        result["phase"] = phase.clone();
+    }
+    result
 }

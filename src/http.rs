@@ -112,6 +112,8 @@ async fn box_detail(
         Ok(Ok(Some(entry))) => {
             let result = if query.get("view").is_some_and(|v| v == "replays") {
                 json!({"replays":entry["state"].get("replays").cloned().unwrap_or_else(||json!([]))})
+            } else if query.get("view").is_some_and(|v| v == "scene") {
+                crate::store::scene_entry(&entry)
             } else {
                 entry
             };
