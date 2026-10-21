@@ -1,4 +1,4 @@
-<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, src/forum.rs, src/presentation.rs -->
+<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, src/forum.rs, src/presentation.rs, src/story.rs -->
 # terrarium-server
 
 生态箱独立服务端，生产 HTTP/WS 与存储使用 Rust + SQLite。兼容现有 World 的 HTTP/WS 协议与 TS 存档，可通过 Native 原子发布控制器运行。公共接口仅监听回环地址，管理台使用独立私网端口。
@@ -107,3 +107,11 @@ node scripts/check-snapshot.mjs /path/to/legacy/server.mjs /path/to/isolated-sna
 论坛保存在主库同目录的 `terrarium.forum.sqlite`（主库文件名扩展为 `.forum.sqlite`），独立 schema 1，不迁移或修改生态箱 schema；生态箱 data epoch 仍为 2。主库与论坛分别备份：`terrarium-server backup-forum --database data/terrarium.sqlite --output forum-backup.sqlite` 使用 SQLite 一致快照，拒绝覆盖已有文件。恢复时停服，将论坛备份放回原 sidecar 路径。旧服务端回滚保留 sidecar，但不提供论坛接口；旧 JSON 导出不包含论坛，迁移机器时需单独携带论坛备份。不要运行旧版全目录恢复来覆盖较新的论坛数据。
 
 排行榜摘要在 SQL 中选出排名页和自己的条目后逐条解析完整状态；不会同时解析所有箱子。Native 运行时使用 2 个异步工作线程、最多 8 个阻塞线程。内存应按 systemd 整组服务测量，包含 Node 校验子进程；论坛和报告队列上限用于约束并发占用，不代表任意连接量下的总内存保证。
+
+## 观察站剧情
+
+私网 `GET /api/admin/story` 查看状态，`PUT /api/admin/story` 接受 `enabled` 和 `threadId`。默认关闭；启用前须指定已存在的论坛主题。用地箱身份回复该主题视为参与，不检查回复文案。第二段任务为地箱 `(4,1)` 的向日葵存活且累计至少 18 个适宜生长小时；已结籽也满足。参与后接受的完整或增量上报可达成，已有合适植物也可使用，不要求重新播种。
+
+达成时，状态提交、定向公告和一次性完成记录共用主库事务。失败或并发冲突不会提前发信；重启、重复上传、移除重种和公告过期后均不再触发。公告满额时照常接受上报，下次提交重试剧情投递。未参与、水箱及关闭状态不触发，不改变积分、解锁或模拟。
+
+配置与完成记录存为现有 `legacy_documents` 中的可选 `story.json`，不修改 SQLite schema 或 data epoch。主库在线备份和 JSON 导入/导出包含该文件；论坛回帖仍需另行 `backup-forum`。旧服务端会保留未知文档，TS 回滚时保留导出的 story.json，迁回 Rust 时重新导入。已有完成记录后不能切换主题，避免重复投递。

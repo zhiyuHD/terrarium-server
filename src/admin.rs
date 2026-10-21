@@ -232,6 +232,7 @@ async fn dispatch(
     let known = matches!(
         path.as_str(),
         "/api/admin/boxes"
+            | "/api/admin/story"
             | "/api/admin/controls"
             | "/api/admin/controls/logo"
             | "/api/admin/controls/forum"
@@ -270,6 +271,7 @@ async fn dispatch(
                 }))
             }
             "/api/admin/controls" => s.controls(now_ms()),
+            "/api/admin/story" => s.story_status(),
             "/api/admin/announcements" => s.list_announcements(),
             "/api/admin/feedback" => s.list_feedback(cursor(query.as_deref())?),
             _ => Err(OperationError::new(405, "Method not allowed").into()),
@@ -281,6 +283,11 @@ async fn dispatch(
         return Err(OperationError::new(501, "Write preview is disabled"));
     }
     match (method, path.as_str()) {
+        (Method::PUT, "/api/admin/story") => {
+            let input = body(request, 1024, "Story configuration too large").await?;
+            let result = operation(store, move |s| s.update_story(&input)).await?;
+            Ok(Json(result).into_response())
+        }
         (
             Method::PUT,
             "/api/admin/controls/http-push"

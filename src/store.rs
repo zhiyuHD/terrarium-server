@@ -17,6 +17,7 @@ const DOCUMENTS: &[&str] = &[
     "announcements.json",
     "feedback.json",
     "protocol-notices.json",
+    "story.json",
     "admin-token",
 ];
 #[derive(Clone)]
@@ -200,6 +201,7 @@ impl Store {
                 return Ok(false);
             }
             insert_entry(tx, id, entry)?;
+            crate::story::on_report(self, tx, entry)?;
             tx.execute(
                 "DELETE FROM legacy_documents WHERE name='leaderboard.json'",
                 [],

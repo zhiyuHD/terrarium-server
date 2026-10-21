@@ -112,6 +112,7 @@ async fn public_listener_hides_administration_and_private_read_only_listener_rej
     let api = private(app);
     for path in [
         "/api/admin/boxes",
+        "/api/admin/story",
         "/api/admin/controls",
         "/api/admin/feedback",
         "/api/admin/announcements",
@@ -934,4 +935,53 @@ async fn forum_and_logo_controls_require_admin_and_support_immediate_schedule_an
     }
     assert_eq!(s.controls(now_ms()).unwrap()["forum"]["enabled"], true);
     assert_eq!(s.controls(now_ms()).unwrap()["logo"]["version"], "0.8.7");
+}
+
+#[tokio::test]
+async fn story_configuration_is_private_authenticated_and_persistent() {
+    let (_dir, store) = fixture();
+    let token = store.admin_token(false).unwrap();
+    let readonly = private(application(store.clone(), false));
+    assert_eq!(
+        request(
+            readonly,
+            "PUT",
+            "/api/admin/story",
+            json!({"enabled":false}),
+            Some(&token)
+        )
+        .await
+        .0,
+        StatusCode::NOT_IMPLEMENTED
+    );
+    let api = private(application(store.clone(), true));
+    assert_eq!(
+        request(
+            api.clone(),
+            "PUT",
+            "/api/admin/story",
+            json!({"enabled":false}),
+            None
+        )
+        .await
+        .0,
+        StatusCode::UNAUTHORIZED
+    );
+    let (status, value) = request(
+        api.clone(),
+        "PUT",
+        "/api/admin/story",
+        json!({"enabled":false}),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(value["enabled"], false);
+    assert_eq!(value["objective"]["minGrowthHours"], 18);
+    assert_eq!(
+        request(api, "GET", "/api/admin/story", Value::Null, Some(&token))
+            .await
+            .1,
+        value
+    );
 }

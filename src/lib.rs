@@ -17,3 +17,5 @@ pub mod operations;
 pub mod forum;
 
 pub mod presentation;
+
+pub mod story;

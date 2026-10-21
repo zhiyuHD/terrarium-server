@@ -55,6 +55,7 @@ pub(crate) fn stable_version(value: &Value) -> bool {
 }
 pub(crate) fn validate_document(name: &str, value: &Value) -> Result<()> {
     match name {
+        "story.json" => crate::story::validate(value)?,
         "feedback.json" => crate::operations::validate_feedback(value)?,
         "controls.json" => {
             ensure!(
