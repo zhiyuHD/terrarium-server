@@ -11,10 +11,10 @@ use axum::{
 };
 use serde_json::json;
 pub fn logo(version: &str) -> &'static str {
-    if version == "0.8.7" {
-        include_str!("../web/logo-0.8.7.svg")
-    } else {
-        include_str!("../web/logo-0.8.6.svg")
+    match version {
+        "0.8.8" => include_str!("../web/logo-0.8.8.svg"),
+        "0.8.7" => include_str!("../web/logo-0.8.7.svg"),
+        _ => include_str!("../web/logo-0.8.6.svg"),
     }
 }
 pub fn page(version: &str, release: Option<&str>) -> String {

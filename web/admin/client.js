@@ -255,7 +255,7 @@ function renderControls() {
   el("minimum-status").textContent = floor?.version ? `\u81F3\u5C11 ${floor.version}` : "\u672A\u9650\u5236";
   el("minimum-schedule").textContent = floor?.scheduledChange ? `${date(floor.scheduledChange.at)} \xB7 ${floor.scheduledChange.version ? `\u81F3\u5C11 ${floor.scheduledChange.version}` : "\u53D6\u6D88\u7248\u672C\u9650\u5236"}` : "\u6682\u65E0\u5B9A\u65F6\u53D8\u66F4";
   el("minimum-cancel").disabled = !floor?.scheduledChange;
-  el("logo-status").textContent = controls.logo?.version === "0.8.7" ? "新邻初见 · 第一阶段 · 0.8.7" : "闲看生机 · 0.8.6";
+  el("logo-status").textContent = logoLabel(controls.logo?.version);
   el("logo-schedule").textContent = controls.logo?.scheduledChange ? `${date(controls.logo.scheduledChange.at)} · ${controls.logo.scheduledChange.version}` : "暂无定时变更";
   el("logo-cancel").disabled = !controls.logo?.scheduledChange;
   const forum = controls.forum;
@@ -454,5 +454,8 @@ el("forum-form").onsubmit = event => {
   confirmAction("定时开放论坛", `${value}（北京时间）开放论坛。`, async () => {await api("controls/forum","PUT",{enabled:true,at:at.toISOString()});});
 };
 
-for (const [id,body] of [["logo-old",{version:"0.8.6"}],["logo-new",{version:"0.8.7"}],["logo-cancel",{cancel:true}]]) el(id).onclick=()=>confirmAction("更换首页 Logo",body.cancel?"取消定时更换。":`显示 ${body.version} 的版本 Logo。`,async()=>{await api("controls/logo","PUT",body)});
-el("logo-form").onsubmit=event=>{event.preventDefault();const value=input("logo-at").value;const at=new Date(`${value.replace(" ","T")}:00+08:00`);const canonical=Number.isFinite(at.getTime())?new Intl.DateTimeFormat("sv-SE",{timeZone:"Asia/Shanghai",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).format(at):"";if(canonical!==value||at.getTime()<=Date.now()+serverOffset){status("请输入有效的未来北京时间");return}confirmAction("定时更换 Logo",`${value}（北京时间）显示新邻初见第一阶段。`,async()=>{await api("controls/logo","PUT",{version:"0.8.7",at:at.toISOString()})})};
+function logoLabel(version) { return ({"0.8.6":"闲看生机 · 0.8.6","0.8.7":"新邻初见 · 第一阶段 · 0.8.7","0.8.8":"新邻初见 · 第二阶段 · 0.8.8"})[version] ?? String(version); }
+let logoScheduleVersion = "0.8.8";
+for (const button of document.querySelectorAll("#logo-phase-choice button")) button.onclick=()=>{logoScheduleVersion=button.dataset.version;for(const other of document.querySelectorAll("#logo-phase-choice button"))other.setAttribute("aria-pressed",String(other===button));};
+for (const [id,body] of [["logo-old",{version:"0.8.6"}],["logo-new",{version:"0.8.7"}],["logo-phase2",{version:"0.8.8"}],["logo-cancel",{cancel:true}]]) el(id).onclick=()=>confirmAction("更换首页 Logo",body.cancel?"取消定时更换。":`显示 ${body.version} 的版本 Logo。`,async()=>{await api("controls/logo","PUT",body)});
+el("logo-form").onsubmit=event=>{event.preventDefault();const value=input("logo-at").value;const at=new Date(`${value.replace(" ","T")}:00+08:00`);const canonical=Number.isFinite(at.getTime())?new Intl.DateTimeFormat("sv-SE",{timeZone:"Asia/Shanghai",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).format(at):"";if(canonical!==value||at.getTime()<=Date.now()+serverOffset){status("请输入有效的未来北京时间");return}confirmAction("定时更换 Logo",`${value}（北京时间）显示${logoLabel(logoScheduleVersion)}。`,async()=>{await api("controls/logo","PUT",{version:logoScheduleVersion,at:at.toISOString()})})};

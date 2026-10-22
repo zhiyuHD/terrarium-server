@@ -66,14 +66,16 @@ pub(crate) fn validate_document(name: &str, value: &Value) -> Result<()> {
             );
             if let Some(logo) = value.get("logo") {
                 ensure!(
-                    matches!(logo["version"].as_str(), Some("0.8.6" | "0.8.7")),
+                    matches!(logo["version"].as_str(), Some("0.8.6" | "0.8.7" | "0.8.8")),
                     "Invalid logo version"
                 );
                 let schedule = &logo["scheduledChange"];
                 ensure!(
                     schedule.is_null()
-                        || (matches!(schedule["version"].as_str(), Some("0.8.6" | "0.8.7"))
-                            && at(&schedule["at"]).is_some()),
+                        || (matches!(
+                            schedule["version"].as_str(),
+                            Some("0.8.6" | "0.8.7" | "0.8.8")
+                        ) && at(&schedule["at"]).is_some()),
                     "Invalid logo schedule"
                 );
             }

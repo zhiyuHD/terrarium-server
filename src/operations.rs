@@ -229,7 +229,7 @@ impl Store {
         }
         if key == "logo"
             && input["cancel"] != true
-            && !matches!(input["version"].as_str(), Some("0.8.6" | "0.8.7"))
+            && !matches!(input["version"].as_str(), Some("0.8.6" | "0.8.7" | "0.8.8"))
         {
             return reject(400, "Unknown logo version");
         }

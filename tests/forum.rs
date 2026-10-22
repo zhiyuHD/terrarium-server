@@ -769,3 +769,32 @@ fn oldest_replies_paginate_by_creation_time_with_stable_ties_and_keep_legacy_ord
         );
     }
 }
+
+#[test]
+fn phase_logos_switch_independently_and_scheduled_phase_two_survives_restart() {
+    let (dir, s, _, _) = fixture();
+    for version in ["0.8.6", "0.8.7", "0.8.8"] {
+        s.update_named_control("logo", &json!({"version": version}), 0)
+            .unwrap();
+        let page = terrarium_server::presentation::page(version, None);
+        assert!(page.contains(version));
+        assert_eq!(s.controls(0).unwrap()["logo"]["version"], version);
+    }
+    assert!(terrarium_server::presentation::logo("0.8.8").contains("第二阶段"));
+    assert!(terrarium_server::presentation::logo("0.8.7").contains("第一阶段"));
+    s.update_named_control("logo", &json!({"version":"0.8.7"}), 0)
+        .unwrap();
+    s.update_named_control(
+        "logo",
+        &json!({"version":"0.8.8","at":"2026-10-22T00:00:00+08:00"}),
+        0,
+    )
+    .unwrap();
+    drop(s);
+    let s = Store::existing(dir.path().join("data.sqlite")).unwrap();
+    let at = chrono::DateTime::parse_from_rfc3339("2026-10-22T00:00:00+08:00")
+        .unwrap()
+        .timestamp_millis();
+    assert_eq!(s.controls(at - 1).unwrap()["logo"]["version"], "0.8.7");
+    assert_eq!(s.controls(at).unwrap()["logo"]["version"], "0.8.8");
+}
