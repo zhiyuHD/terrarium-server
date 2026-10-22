@@ -43,6 +43,7 @@ pub fn router(app: App) -> Router {
         )
         .route("/api/forum/status", get(crate::forum::status))
         .route("/api/forum/{*path}", any(crate::forum::handle))
+        .route("/api/photos", post(crate::photos::take))
         .route("/health", get(health))
         .route("/api/leaderboard", get(leaderboard))
         .route("/api/boxes/{id}", get(box_detail))

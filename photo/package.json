@@ -1,0 +1,8 @@
+{
+  "name": "terrarium-photo-renderer",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "node build.mjs", "test": "node --test test.mjs" },
+  "dependencies": { "@napi-rs/canvas": "0.1.80" },
+  "devDependencies": { "esbuild": "0.28.1" }
+}

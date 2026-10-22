@@ -15,6 +15,8 @@ try{
  for(const name of ['admin.mjs','runner.mjs','release.mjs'])await cp(join(repository,'controller',name),join(source,name));
  for(const name of ['index.html','scene.js'])await cp(join(repository,'web',name),join(source,name));
  await cp(join(repository,'web/admin'),join(source,'console'),{recursive:true});
+ execFileSync('npm',['run','build'],{cwd:join(repository,'photo'),stdio:'inherit'});
+ for(const name of ['Photo-canvas-LICENSE.txt','photo-worker.mjs','photo-canvas.node','MiSans-Regular.woff2','MiSans-Semibold.woff2','MiSans-LICENSE.pdf'])await cp(join(repository,'photo/dist',name),join(source,'console/assets',name));
  await mkdir(resolve(values.output,'..'),{recursive:true});
  const raw=execFileSync(process.execPath,[join(repository,'controller/release.mjs'),'pack','--source',source,'--output',resolve(values.output),'--id',values.id,'--version',values.version,'--revision',values.revision,'--native-target',`linux-${process.arch}`,'--data-epoch','2'],{encoding:'utf8'});
  const manifest=JSON.parse(raw);

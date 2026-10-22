@@ -1,4 +1,4 @@
-<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, web/forum.html, web/admin/index.html, web/admin/client.js, src/forum.rs, src/forum_recommendation.rs, src/forum_bridge.rs, src/forum_digest.rs, src/presentation.rs, src/story.rs, src/story_text.rs, reading/worker.py -->
+<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, web/forum.html, web/admin/index.html, web/admin/client.js, src/forum.rs, src/forum_recommendation.rs, src/forum_bridge.rs, src/forum_digest.rs, src/presentation.rs, src/story.rs, src/story_text.rs, reading/worker.py, src/photos.rs, photo/render.mjs, photo/build.mjs -->
 # terrarium-server
 
 生态箱独立服务端，生产 HTTP/WS 与存储使用 Rust + SQLite。兼容现有 World 的 HTTP/WS 协议与 TS 存档，可通过 Native 原子发布控制器运行。公共接口仅监听回环地址，管理台使用独立私网端口。
@@ -172,3 +172,11 @@ node scripts/check-snapshot.mjs /path/to/legacy/server.mjs /path/to/isolated-sna
 ## 定时推读
 
 独立任务按北京时间 23:00、03:00、12:00，从论坛推荐榜前十随机抽一帖，让配置的 LLM 写推荐词并发布全局公告，成功后自动删除上一条系统推读。支持 TOML 配置、手动触发和重启去重；详见 [reading/README.md](reading/README.md)。
+
+## 拍照服务
+
+World 0.8.9「照记影踪」通过 `POST /api/photos` 请求当前箱子的 Material You 海报。Bearer token 使用已有箱子凭据，请求体 `{id,stateHash,phase,caption,clientVersion}`；状态 hash 必须与已提交的完整存档一致。配文最多 120 字。只返回 PNG 和状态 hash、拍摄时间响应头，不保存服务端相册，也不更改箱子状态或积分。Core 保存图片附件，QQ World 使用其图片句柄发送。
+
+在打包前执行 `npm --prefix photo ci` 安装锁定的构建依赖。`scripts/pack-release.mjs` 自动构建绘图 worker、复制对应 Linux 架构的 Canvas 原生模块、MiSans 字体与许可证到 `console/assets/`，沿用原子发布校验和回滚流程，data epoch 仍为 2。开发和测试先执行 `npm --prefix photo run build`。生产只加载当前发布内的绘图资源。安装包不包含 Chromium；每次渲染启动一个 Node 子进程，20 秒超时退出、PNG 上限 8 MiB、同一时间只允许一次渲染，忙时返回 429。Node 的 V8 堆上限为 96 MiB，原生图形内存不计入此上限。取消请求会结束该子进程。
+
+拍照测试：`npm --prefix photo test` 与 `cargo test --locked --test photos`。前者检查两箱 PNG 尺寸、相同场景重现、配文与昼夜变化；后者检查真实 SQLite 鉴权、快照 hash 冲突、状态不被拍照修改，以及两个箱子的图片输出。管理台可立即或定时选择 0.8.9 字标，更新服务端不会自动更换当前云控选择。

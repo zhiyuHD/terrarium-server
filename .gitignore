@@ -5,3 +5,6 @@
 .env
 
 /bridge/node_modules/
+
+/photo/node_modules/
+/photo/dist/
