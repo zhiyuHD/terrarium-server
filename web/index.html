@@ -6,6 +6,15 @@
 <meta name="theme-color" content="#f5f5ed">
 <title>生态箱 · 观察站</title>
 <script>
+async function fetchJson(url,signal,options={}){
+ const {timeoutMs=15000,...init}=options,request=new AbortController(),cancel=()=>request.abort();
+ if(signal?.aborted)cancel();else signal?.addEventListener('abort',cancel,{once:true});
+ const timer=setTimeout(cancel,timeoutMs);
+ try{const response=await fetch(url,{...init,signal:request.signal});return {response,value:await response.json()}}
+ finally{clearTimeout(timer);signal?.removeEventListener('abort',cancel)}
+}
+</script>
+<script>
 (() => {
   const key = 'terrarium.theme';
   const modes = ['system', 'dark', 'light'];
@@ -137,8 +146,8 @@ function clearViews(){for(const view of scenes.values())removeView(view);scenes.
 async function loadReplays(view){
  view.replayAbort?.abort();const abort=view.replayAbort=new AbortController();view.replayLoad.disabled=true;view.replayLoad.textContent='正在读取回放…';
  try{
-  const response=await fetch('/api/boxes/'+encodeURIComponent(view.entry.id)+'?view=replays',{signal:AbortSignal.any([abort.signal,AbortSignal.timeout(15000)]),cache:'no-store'});if(!response.ok)throw Error('HTTP '+response.status);
-  const data=await response.json();if(abort.signal.aborted||scenes.get(view.entry.id)!==view)return;
+  const {response,value:data}=await fetchJson('/api/boxes/'+encodeURIComponent(view.entry.id)+'?view=replays',abort.signal,{cache:'no-store'});if(!response.ok)throw Error('HTTP '+response.status);
+  if(abort.signal.aborted||scenes.get(view.entry.id)!==view)return;
   view.replay?.dispose();view.replay=createPublicReplayControls(view.replayContainer,view.createScene);view.replay.setActive(view.visible&&!document.hidden);view.replay.setReplays(data.replays);
   view.replayLoad.textContent='刷新捕食回放';view.replayContainer.querySelector('.pc-disclosure').click();
  }catch(error){if(!abort.signal.aborted)view.replayLoad.textContent='回放读取失败，点击重试'}
@@ -180,8 +189,8 @@ function render(){
 let publicAnnouncements=[];
 async function loadAnnouncements(){
  try{
-  const response=await fetch('/api/announcements/public?view=latest',{signal:AbortSignal.timeout(10000),cache:'no-store'});if(!response.ok)return;
-  const {announcements:next}=await response.json();if(JSON.stringify(next)===JSON.stringify(publicAnnouncements))return;
+  const {response,value}=await fetchJson('/api/announcements/public?view=latest',undefined,{timeoutMs:10000,cache:'no-store'});if(!response.ok)return;
+  const {announcements:next}=value;if(JSON.stringify(next)===JSON.stringify(publicAnnouncements))return;
   const oldIds=new Set(publicAnnouncements.map(notice=>notice.id));publicAnnouncements=next;const root=$('announcements');root.hidden=!next.length;
   root.replaceChildren(...[...next].reverse().map(notice=>{const article=el('article','announcement'),title=el('h3','',notice.title||'服务端公告'),text=el('p','',notice.text),time=el('time','',dateFormat.format(new Date(notice.createdAt)));time.dateTime=notice.createdAt;article.append(title,text,time);if(!oldIds.has(notice.id))animate(article,[{opacity:0,transform:'translateY(-8px)'},{opacity:1,transform:'translateY(0)'}],{duration:320,easing:'ease-out'});return article}));
  }catch{}
@@ -191,8 +200,8 @@ async function load(){
  requestAbort?.abort();const abort=requestAbort=new AbortController(),version=++requestVersion,requestedKind=kind;loading=true;for(const pager of pagers){pager.previous.disabled=pager.next.disabled=true;}
  try{
   const query=new URLSearchParams({kind:requestedKind,view:'gallery',page:String(page),pageSize:'4',sort:sort.value,q:$('search').value.trim()});
-  const response=await fetch('/api/leaderboard?'+query,{signal:AbortSignal.any([abort.signal,AbortSignal.timeout(15000)]),cache:'no-store'});if(!response.ok)throw Error('HTTP '+response.status);
-  const rows=await response.json();if(version!==requestVersion)return;
+  const {response,value:rows}=await fetchJson('/api/leaderboard?'+query,abort.signal,{cache:'no-store'});if(!response.ok)throw Error('HTTP '+response.status);
+  if(version!==requestVersion)return;
   entries=rows.entries;page=rows.page;pages=rows.pages;total=rows.total;counts=rows.counts;loaded=true;$('error').hidden=true;$('connection').dataset.state='online';$('connection-label').textContent='同步中 · 每 15 秒';render();
  }catch(error){if(version!==requestVersion||abort.signal.aborted)return;$('error').hidden=false;$('error').querySelector('span').textContent=loaded?'连接中断，保留上次同步的状态。':'暂时无法读取生态箱。';$('connection').dataset.state='error';$('connection-label').textContent='连接中断';if(!loaded)$('status').textContent='等待重新连接';}
  finally{if(version===requestVersion){loading=false;render()}}
@@ -209,7 +218,7 @@ const feedbackToggle=document.getElementById('feedback-toggle'),feedbackPanel=do
 feedbackToggle.addEventListener('click',()=>{feedbackPanel.hidden=!feedbackPanel.hidden;feedbackToggle.setAttribute('aria-expanded',String(!feedbackPanel.hidden));if(!feedbackPanel.hidden)feedbackText.focus()});
 feedbackPanel.addEventListener('keydown',event=>{if(event.key==='Escape'){feedbackPanel.hidden=true;feedbackToggle.setAttribute('aria-expanded','false');feedbackToggle.focus()}});
 let feedbackPending=false;
-document.getElementById('feedback-form').addEventListener('submit',async event=>{event.preventDefault();if(feedbackPending)return;const text=feedbackText.value.trim(),contact=feedbackContact.value.trim();if(!text||text.length>2000){feedbackStatus.textContent='请填写 1–2000 字的反馈内容';feedbackText.focus();return}feedbackPending=true;feedbackSubmit.disabled=true;feedbackText.disabled=true;feedbackContact.disabled=true;feedbackStatus.textContent='提交中…';try{const response=await fetch('/api/feedback',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text,contact,source:'web'}),signal:AbortSignal.timeout(10000)});if(!response.ok)throw new Error(response.status===429?'提交过于频繁，请一分钟后重试':response.status===404||response.status===405?'服务端暂不支持反馈':response.status===503?'反馈收件箱已满，请稍后再试':`提交失败（${response.status}）`);const receipt=await response.json();if(!Number.isSafeInteger(receipt.id)||receipt.id<1)throw new Error('服务端回执格式不兼容');feedbackStatus.textContent=`已提交，编号 #${receipt.id}`;feedbackText.value='';feedbackContact.value=''}catch(error){feedbackStatus.textContent=error instanceof Error?error.message:'提交失败，请稍后重试'}finally{feedbackPending=false;feedbackSubmit.disabled=false;feedbackText.disabled=false;feedbackContact.disabled=false}});
+document.getElementById('feedback-form').addEventListener('submit',async event=>{event.preventDefault();if(feedbackPending)return;const text=feedbackText.value.trim(),contact=feedbackContact.value.trim();if(!text||text.length>2000){feedbackStatus.textContent='请填写 1–2000 字的反馈内容';feedbackText.focus();return}feedbackPending=true;feedbackSubmit.disabled=true;feedbackText.disabled=true;feedbackContact.disabled=true;feedbackStatus.textContent='提交中…';try{const {response,value:receipt}=await fetchJson('/api/feedback',undefined,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text,contact,source:'web'}),timeoutMs:10000});if(!response.ok)throw new Error(response.status===429?'提交过于频繁，请一分钟后重试':response.status===404||response.status===405?'服务端暂不支持反馈':response.status===503?'反馈收件箱已满，请稍后再试':`提交失败（${response.status}）`);if(!Number.isSafeInteger(receipt.id)||receipt.id<1)throw new Error('服务端回执格式不兼容');feedbackStatus.textContent=`已提交，编号 #${receipt.id}`;feedbackText.value='';feedbackContact.value=''}catch(error){feedbackStatus.textContent=error instanceof Error?error.message:'提交失败，请稍后重试'}finally{feedbackPending=false;feedbackSubmit.disabled=false;feedbackText.disabled=false;feedbackContact.disabled=false}});
 </script>
 <script>
 (async()=>{let version=document.querySelector('.release-art')?.dataset.version;async function update(){try{const r=await fetch('/api/presentation');if(!r.ok)return;const p=await r.json();if(p.logoVersion!==version&&typeof p.logo==='string'){const art=document.querySelector('.release-art');if(art){art.innerHTML=p.logo;art.dataset.version=p.logoVersion;version=p.logoVersion}}}catch{}}await update();setInterval(()=>{if(!document.hidden)update()},60000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)update()})})();

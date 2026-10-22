@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { test } from 'node:test';
+import { describe, test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 
-const html = readFileSync(new URL('../web/forum.html', import.meta.url), 'utf8');
-const source = html.slice(html.indexOf('async function fetchJson('), html.indexOf('async function api('));
+for (const page of ['forum', 'index']) describe(page, () => {
+const html = readFileSync(new URL(`../web/${page}.html`, import.meta.url), 'utf8');
+const start = html.indexOf('async function fetchJson(');
+const source = html.slice(start, page === 'forum' ? html.indexOf('async function api(') : html.indexOf('</script>', start));
 function browser(fetch) {
   const timers = new Map();
   const read = runInNewContext(`${source}\nfetchJson`, {
@@ -30,7 +32,7 @@ function navigation() {
   return { controller, signal, listeners };
 }
 
-test('forum JSON reads work without AbortSignal static helpers and release their timer and navigation listener', async () => {
+test('JSON reads work without AbortSignal static helpers and release their timer and navigation listener', async () => {
   const nav = navigation(), response = new Response('{"enabled":true}');
   const { read, timers } = browser(async () => response);
   const result = await read('/api/forum/status', nav.signal);
@@ -39,7 +41,7 @@ test('forum JSON reads work without AbortSignal static helpers and release their
   assert.equal(timers.size, 0); assert.equal(nav.listeners.size, 0);
 });
 
-test('changing pages cancels a pending forum request and releases resources', async () => {
+test('changing pages cancels a pending request and releases resources', async () => {
   const nav = navigation();
   const { read, timers } = browser(async (_, { signal }) => cancelled(signal));
   const pending = read('/api/forum/threads', nav.signal);
@@ -55,7 +57,7 @@ test('a page already left cannot issue an uncancelled request', async () => {
   assert.equal(timers.size, 0); assert.equal(nav.listeners.size, 0);
 });
 
-test('the timeout also aborts a profile habitat response stalled while reading JSON', async () => {
+test('the timeout also aborts a scene response stalled while reading JSON', async () => {
   const nav = navigation(); let bodyStarted;
   const started = new Promise(resolve => { bodyStarted = resolve; });
   const { read, timers } = browser(async (_, { signal }) => ({ async json() { bodyStarted(); return cancelled(signal); } }));
@@ -74,4 +76,18 @@ test('HTTP error payloads remain available and invalid JSON releases resources',
   assert.equal(result.response.status, 404); assert.equal(result.value.error, 'Missing');
   await assert.rejects(read('/invalid', nav.signal), SyntaxError);
   assert.equal(timers.size, 0); assert.equal(nav.listeners.size, 0);
+});
+
+if (page === 'index') test('feedback keeps POST options and a ten-second deadline without a navigation signal', async () => {
+  let complete;
+  const { read, timers } = browser((url, init) => {
+    assert.equal(url, '/api/feedback'); assert.equal(init.method, 'POST');
+    assert.equal(init.body, '{"text":"Test feedback"}'); assert.equal(init.cache, 'no-store');
+    assert.equal(init.headers['content-type'], 'application/json');
+    return new Promise(resolve => { complete = () => resolve(new Response('{"id":1}')); });
+  });
+  const pending = read('/api/feedback', undefined, { method: 'POST', headers: {'content-type':'application/json'}, body: '{"text":"Test feedback"}', cache: 'no-store', timeoutMs: 10_000 });
+  assert.equal([...timers.values()][0].delay, 10_000);
+  complete(); assert.equal((await pending).value.id, 1); assert.equal(timers.size, 0);
+});
 });

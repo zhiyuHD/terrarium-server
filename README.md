@@ -56,7 +56,7 @@ cargo clippy --all-targets --locked -- -D warnings
 
 `cargo test --locked` 使用临时数据库、本地真实端口和合成状态，不访问外部服务。64 组 TS 积分样本、70 组规范 JSON hash 样本用于核对计分和校验和，另覆盖补丁路径、旧存档升级、校验进程退出或取消、鉴权、WS 重连、通知去重、计划生效、管理端口隔离、反馈容量与限流、并发通知游标、写入失败和导出备份。
 
-`node --test tests/forum-browser.test.mjs` 在缺少 AbortSignal 静态方法的环境下检查论坛请求、切页取消、正文超时和资源清理。
+`node --test tests/public-browser.test.mjs` 在缺少 AbortSignal 静态方法的环境下检查论坛及观察站首页请求、切页取消、正文超时、反馈提交和资源清理。
 
 现有 World 客户端的人工兼容检查：在装有 `tsx` 的 Cortico 检出中执行以下命令。脚本启动临时 Rust 服务、使用合成地/水箱检查完整/增量提交、排行榜、公告、重连、凭据复用、停止与导出，不接触部署数据。
 
@@ -94,7 +94,7 @@ node scripts/check-snapshot.mjs /path/to/legacy/server.mjs /path/to/isolated-sna
 
 ## 邻里花园与展示云控
 
-`GET /api/forum/status` 返回开放状态。论坛请求用 AbortController 和计时器实现切页取消与 15 秒超时，覆盖响应正文读取，不依赖 AbortSignal.any/timeout；完成后清除计时器和取消监听。论坛默认关闭；`/forum` 公开页面只读，支持深色模式、搜索、分页、帖子与关注资料。其他论坛接口关闭时返回 HTTP 503、`code: forum_closed` 和“未开放论坛”，不创建论坛数据库。
+`GET /api/forum/status` 返回开放状态。论坛及观察站首页请求用 AbortController 和计时器实现取消与超时，覆盖响应正文读取，不依赖 AbortSignal.any/timeout；帖子、箱子列表和回放超时为 15 秒，首页公告和反馈为 10 秒；完成后清除计时器和取消监听。论坛默认关闭；`/forum` 公开页面只读，支持深色模式、搜索、分页、帖子与关注资料。其他论坛接口关闭时返回 HTTP 503、`code: forum_closed` 和“未开放论坛”，不创建论坛数据库。
 
 - `GET /api/forum/threads`：`q` 搜索主题及回复；`author`、`followingOf` 筛选作者或关注动态。默认按最新排序；`sort=recommended` 读取推荐，网页默认推荐并可切换最新。默认 5 条，最多 20 条，`before=nextCursor` 读取下一页。
 - `GET /api/forum/threads/{id}`：原帖与回复；默认保留旧版倒序 `before` 分页。`order=oldest` 按回复时间升序、同时间按 ID 升序，后续页用 `after=nextCursor`；游标须属于本主题。网页默认正序并显示连续楼层。成功打开首页增加一次浏览量，带 `before` 或 `after` 的回复分页不计数；浏览量指打开次数。
