@@ -51,6 +51,7 @@ var feedback = [];
 var notices = [];
 var controls;
 var filter = "*";
+var statisticsScope = "reported";
 var pendingOnly = false;
 var allTargets = false;
 var scheduleEnabled = false;
@@ -198,9 +199,118 @@ function render() {
     versions.append(control);
   }
   renderBoxes();
+  renderStatistics();
   renderFeedback();
   renderNotices();
   renderControls();
+}
+function statisticsDistribution(boxes, label) {
+  const counts = new Map();
+  for (const box of boxes) {
+    const key = label(box);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts].map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+}
+function statisticsData(boxes, scope, now) {
+  const reported = boxes.filter(box => box.reportedAt);
+  const recent = box => {
+    const age = now - Date.parse(box.reportedAt);
+    return age >= 0 && age <= 24 * 60 * 60 * 1000;
+  };
+  const selected = reported.filter(box => scope === "recent" ? recent(box) : scope === "online" ? box.wsConnections > 0 : true);
+  const dimensions = [
+    ["World 版本", box => box.clientVersion || "≤0.7.3（推定）"],
+    ["操作系统", box => box.clientSystem?.name || "未上报"],
+    ["系统版本", box => box.clientSystem ? `${box.clientSystem.name} · ${box.clientSystem.version}` : "未上报"],
+    ["部署识别", box => box.coopanionVersion ? "Coopanion" : "未识别"],
+    ["Coopanion 版本", box => box.coopanionVersion || "未上报"],
+    ["生态箱类型", box => box.kind === "land" ? "地箱" : box.kind === "water" ? "水箱" : "未知"],
+    ["最近提交方式", box => box.reportTransport === "websocket" ? "WebSocket" : box.reportTransport === "http" ? "HTTP" : "未记录"]
+  ];
+  return {
+    total: selected.length,
+    reported: reported.length,
+    unreported: boxes.length - reported.length,
+    recent: reported.filter(recent).length,
+    charts: dimensions.map(([title, label]) => ({ title, rows: statisticsDistribution(selected, label) }))
+  };
+}
+function statisticsSlices(rows) {
+  if (rows.length <= 8) return rows;
+  return [...rows.slice(0, 8), { label: "其他", count: rows.slice(8).reduce((total, row) => total + row.count, 0) }];
+}
+function statisticsChart({ title, rows }, total) {
+  const card = node("article", "", "card chart-card");
+  card.append(node("h3", title));
+  if (!total) {
+    card.append(node("p", "当前范围内没有已上报的盒子", "empty"));
+    return card;
+  }
+  const colors = ["#68bd99", "#79a9ea", "#d9aa66", "#ba93da", "#dd879b", "#5fbcc8", "#bdc763", "#9f9cdb", "#899b9c"];
+  const namespace = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(namespace, "svg");
+  svg.setAttribute("viewBox", "0 0 180 180");
+  svg.setAttribute("class", "distribution-chart");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", `${title}分布，共 ${total} 个盒子，数量和比例见下方明细`);
+  const layout = node("div", "", "chart-content");
+  const legend = node("ul", "", "chart-legend");
+  let offset = 0;
+  for (const [index, row] of statisticsSlices(rows).entries()) {
+    const share = row.count / total;
+    const circle = document.createElementNS(namespace, "circle");
+    for (const [key, value] of Object.entries({ cx: 90, cy: 90, r: 64, fill: "none", stroke: colors[index], "stroke-width": 26, "stroke-dasharray": `${share * 402.12386} 402.12386`, "stroke-dashoffset": -offset * 402.12386, transform: "rotate(-90 90 90)" })) circle.setAttribute(key, String(value));
+    const tooltip = document.createElementNS(namespace, "title");
+    tooltip.textContent = `${row.label}：${row.count} 个 · ${(share * 100).toFixed(1)}%`;
+    circle.append(tooltip);
+    svg.append(circle);
+    offset += share;
+    const item = node("li");
+    const swatch = node("span", "", "chart-swatch");
+    swatch.style.backgroundColor = colors[index];
+    swatch.setAttribute("aria-hidden", "true");
+    item.append(swatch, node("span", row.label, "chart-label"), node("strong", `${row.count} · ${(share * 100).toFixed(1)}%`, "chart-value"));
+    legend.append(item);
+  }
+  const center = document.createElementNS(namespace, "text");
+  center.setAttribute("x", "90");
+  center.setAttribute("y", "98");
+  center.setAttribute("text-anchor", "middle");
+  center.setAttribute("class", "chart-total");
+  center.textContent = String(total);
+  svg.append(center);
+  layout.append(svg, legend);
+  card.append(layout);
+  if (rows.length > 8) {
+    const details = node("ul", "", "chart-details");
+    details.hidden = true;
+    for (const row of rows) {
+      const item = node("li");
+      item.append(node("span", row.label, "chart-label"), node("strong", `${row.count} · ${(row.count / total * 100).toFixed(1)}%`));
+      details.append(item);
+    }
+    const toggle = button(`全部 ${rows.length} 项明细`, () => {
+      details.hidden = !details.hidden;
+      toggle.setAttribute("aria-expanded", String(!details.hidden));
+    });
+    toggle.setAttribute("aria-expanded", "false");
+    card.append(toggle, details);
+  }
+  return card;
+}
+function renderStatistics() {
+  const data = statisticsData(snapshot.boxes, statisticsScope, Date.parse(snapshot.serverAt));
+  el("statistics-summary").textContent = `当前统计 ${data.total} 个 · 全部已上报 ${data.reported} 个 · 近 24 小时 ${data.recent} 个 · 从未上报 ${data.unreported} 个（不计入图表）`;
+  el("statistics-charts").replaceChildren(...data.charts.map(chart => statisticsChart(chart, data.total)));
+}
+for (const control of document.querySelectorAll("#statistics-scope [data-scope]")) {
+  control.onclick = () => {
+    statisticsScope = control.dataset.scope;
+    for (const item of document.querySelectorAll("#statistics-scope [data-scope]")) item.setAttribute("aria-pressed", String(item === control));
+    if (snapshot) renderStatistics();
+  };
 }
 function renderFeedback() {
   const list = el("feedback-list");

@@ -608,3 +608,24 @@ a {
 a:hover {
   color: var(--accent);
 }
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+.chart-card { min-width: 0; }
+#statistics .section-heading { flex-wrap: wrap; }
+#statistics-scope { margin: 0; }
+.chart-content { display: flex; flex-wrap: wrap; align-items: center; gap: 20px; }
+.distribution-chart { width: 180px; height: 180px; flex: none; overflow: visible; }
+.distribution-chart circle { transition: stroke-width .2s; }
+.distribution-chart circle:hover { stroke-width: 32; }
+.chart-total { fill: var(--text); font: 600 27px MiSans, sans-serif; }
+.chart-legend, .chart-details { list-style: none; padding: 0; margin: 0; min-width: 0; flex: 1 1 180px; }
+.chart-legend li, .chart-details li { display: flex; gap: 9px; align-items: baseline; padding: 5px 0; font-size: 12px; }
+.chart-swatch { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+.chart-label { overflow-wrap: anywhere; min-width: 0; flex: 1; }
+.chart-value { white-space: nowrap; font-weight: 400; font-variant-numeric: tabular-nums; }
+.chart-details { border-top: 1px solid var(--line); margin-top: 15px; padding-top: 10px; }
+.chart-card > button { margin-top: 16px; }
+@media (max-width: 850px) { .chart-grid { grid-template-columns: minmax(0, 1fr); } }
