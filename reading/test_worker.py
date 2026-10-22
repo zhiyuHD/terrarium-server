@@ -42,6 +42,9 @@ class ReadingTests(unittest.TestCase):
                 self.respond({}, 404)
 
             def do_POST(self):
+                if self.path.startswith('http://'):
+                    from urllib.parse import urlsplit
+                    self.path = urlsplit(self.path).path
                 body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                 if self.path == '/v1/chat/completions':
                     owner.llm_calls.append(body)
@@ -172,6 +175,14 @@ class ReadingTests(unittest.TestCase):
             worker = Worker(self.config, reopened, choose=lambda rows: self.fail('selection should persist'))
             self.assertFalse(worker.tick(self.now))
         self.assertEqual(len(self.llm_calls), 1)
+
+    def test_llm_proxy_routes_model_call_without_proxying_forum_or_admin(self):
+        origin = self.config['llm']['base_url'].removesuffix('/v1')
+        self.config['llm']['proxy_url'] = origin
+        self.config['llm']['base_url'] = 'http://provider.invalid/v1'
+        self.assertTrue(self.worker.tick(self.now))
+        self.assertEqual(len(self.llm_calls), 1)
+        self.assertEqual(len(self.notices), 2)
 
     def test_bad_toml_error_does_not_echo_secret(self):
         path = Path(self.tmp.name) / 'bad.toml'

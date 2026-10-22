@@ -13,6 +13,7 @@ api_key = "REPLACE_WITH_YOUR_KEY"
 model = "your-model"
 timeout_sec = 90
 max_tokens = 500
+# proxy_url = "http://127.0.0.1:7890"
 
 [[schedule]]
 time = "23:00"

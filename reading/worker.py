@@ -25,7 +25,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def request(url, *, token=None, body=None, method=None, timeout=20):
+def request(url, *, token=None, body=None, method=None, timeout=20, proxy=None):
     headers = {'Accept': 'application/json'}
     if token:
         headers['Authorization'] = 'Bearer ' + token
@@ -35,7 +35,7 @@ def request(url, *, token=None, body=None, method=None, timeout=20):
         headers['Content-Type'] = 'application/json'
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        with urllib.request.build_opener(NoRedirect).open(req, timeout=timeout) as response:
+        with urllib.request.build_opener(NoRedirect, *([urllib.request.ProxyHandler({'https': proxy, 'http': proxy})] if proxy else [])).open(req, timeout=timeout) as response:
             data = response.read(262145)
             if len(data) > 262144:
                 raise ValueError('Response exceeds size limit')
@@ -116,7 +116,7 @@ class Worker:
         # Only public post content is sent; client identities and credentials are excluded.
         material = {key: post.get(key, '') for key in ('title', 'authorName', 'body')}
         material['body'] = str(material['body'])[:6000]
-        result = self.http(llm['base_url'].rstrip('/') + '/chat/completions', token=llm['api_key'], timeout=llm.get('timeout_sec', 90), body={
+        result = self.http(llm['base_url'].rstrip('/') + '/chat/completions', token=llm['api_key'], timeout=llm.get('timeout_sec', 90), proxy=llm.get('proxy_url'), body={
             'model': llm['model'], 'messages': [{'role': 'system', 'content': SYSTEM}, {'role': 'user', 'content': json.dumps(material, ensure_ascii=False)}],
             'max_tokens': llm.get('max_tokens', 500), 'stream': False,
         })
