@@ -1,0 +1,27 @@
+enabled = true
+timezone = "Asia/Shanghai"
+state_file = "/home/zhiyu/services/cortico-box/data/reading.sqlite"
+
+[server]
+public_url = "http://127.0.0.1:8787"
+admin_url = "http://192.168.22.219:8788"
+admin_token_file = "/home/zhiyu/services/cortico-box/data/admin-token"
+
+[llm]
+base_url = "https://example.invalid/v1"
+api_key = "REPLACE_WITH_YOUR_KEY"
+model = "your-model"
+timeout_sec = 90
+max_tokens = 500
+
+[[schedule]]
+time = "23:00"
+label = "夜间推读"
+
+[[schedule]]
+time = "03:00"
+label = "深夜导读"
+
+[[schedule]]
+time = "12:00"
+label = "午间推读"

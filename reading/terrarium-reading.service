@@ -1,0 +1,17 @@
+[Unit]
+Description=Terrarium scheduled reading recommendations
+After=network-online.target cortico-box.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /home/zhiyu/services/cortico-reading/current/worker.py --config /home/zhiyu/services/cortico-reading/config.toml
+Restart=on-failure
+RestartSec=15
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+MemoryMax=96M
+
+[Install]
+WantedBy=default.target
