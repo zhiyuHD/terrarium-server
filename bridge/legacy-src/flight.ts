@@ -1,6 +1,6 @@
 export const TERRARIUM_FLY_ACTION_INTERVAL_MS = 10_000;
 export const TERRARIUM_FLY_MOVE_PROBABILITY = .75;
-export const TERRARIUM_FLY_SPECIES = ['fruit_fly', 'mosquito', 'moth'] as const;
+export const TERRARIUM_FLY_SPECIES = ['fruit_fly', 'mosquito', 'moth', 'bee', 'butterfly'] as const;
 export type FlyingSpecies = typeof TERRARIUM_FLY_SPECIES[number];
 export function isFlying(species: string): species is FlyingSpecies { return (TERRARIUM_FLY_SPECIES as readonly string[]).includes(species); }
 

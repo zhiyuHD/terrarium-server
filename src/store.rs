@@ -517,6 +517,7 @@ pub(crate) fn scene_entry(entry: &Value) -> Value {
             "oxygen",
             "cleanliness",
             "fish",
+            "eggs",
             "food",
         ]
     } else {

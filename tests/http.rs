@@ -116,6 +116,9 @@ async fn scene_details_render_land_and_water_without_history_or_replay_payloads(
     for (n, kind) in [(0, "land"), (1, "water")] {
         let id = format!("scene-{kind}");
         let mut state = cases[n]["state"].clone();
+        if kind == "water" {
+            state["eggs"] = json!([{ "id": "egg", "species": "neon_tetra", "x": 1, "y": 1, "health": 100, "incubationHours": 2 }]);
+        }
         state["history"] = json!([{"test":"history"}]);
         state["replays"] = json!([{"test":"replay"}]);
         let entry = json!({"id":id,"kind":kind,"state":state,"phase":"night","reportedAt":"2026-10-20T00:00:00Z","reportRevision":"fixture"});
@@ -141,7 +144,7 @@ async fn scene_details_render_land_and_water_without_history_or_replay_payloads(
         assert!(scene["state"].get("history").is_none());
         assert!(scene["state"].get("replays").is_none());
         for field in if kind == "water" {
-            vec!["plants", "fish", "oxygen", "cleanliness"]
+            vec!["plants", "fish", "eggs", "oxygen", "cleanliness"]
         } else {
             vec!["plants", "bugs", "soil"]
         } {

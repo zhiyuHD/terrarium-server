@@ -181,3 +181,5 @@ World 0.8.9「照记影踪」通过 `POST /api/photos` 请求当前箱子的 Mat
 在打包前执行 `npm --prefix photo ci` 安装锁定的构建依赖。`scripts/pack-release.mjs` 自动构建绘图 worker、复制对应 Linux 架构的 Canvas 原生模块、MiSans 字体与许可证到 `console/assets/`，沿用原子发布校验和回滚流程，data epoch 仍为 2。开发和测试先执行 `npm --prefix photo run build`。生产只加载当前发布内的绘图资源。安装包不包含 Chromium；每次渲染启动一个 Node 子进程，20 秒超时退出、PNG 上限 8 MiB、同一时间只允许一次渲染，忙时返回 429。Node 的 V8 堆上限为 96 MiB，原生图形内存不计入此上限。取消请求会结束该子进程。
 
 拍照测试：`npm --prefix photo test` 与 `cargo test --locked --test photos`。前者检查两箱 PNG 尺寸、相同场景重现、配文与昼夜变化；后者检查真实 SQLite 鉴权、快照 hash 冲突、状态不被拍照修改，以及两个箱子的图片输出。管理台可立即或定时选择 0.8.9 字标，更新服务端不会自动更换当前云控选择。
+
+0.8.10 第三阶段：状态校验保留授粉、花粉、鱼卵和幼鱼字段，水箱场景及照片显示鱼卵，支持独立云控第三阶段字标。旧版客户端字段继续可选，不改变存储格式或现有 Logo 选择。

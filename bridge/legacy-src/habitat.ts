@@ -1,5 +1,5 @@
 import { capacity, nearFacility, type DevelopmentState } from './progression.ts';
-export type PlantSpecies = 'fern' | 'clover' | 'moss' | 'basil' | 'bean' | 'sunflower' | 'mint';
+export type PlantSpecies = 'fern' | 'clover' | 'moss' | 'basil' | 'bean' | 'sunflower' | 'mint' | 'daisy' | 'lavender';
 export interface PlantRequirements { minMoisture: number; maxMoisture: number; minLight: number; maxLight: number }
 export interface SoilCell { x: number; y: number; moisture: number; allowAntForaging?: boolean; antBackfilled?: boolean }
 export const TERRARIUM_LEAF_DAMAGE = { perHarvestHealth: 5, recoveryPerGrowthHour: 2 } as const;
@@ -15,6 +15,8 @@ export const TERRARIUM_PLANT_REQUIREMENTS: Record<PlantSpecies, PlantRequirement
   basil: { minMoisture: 30, maxMoisture: 75, minLight: .65, maxLight: 1 },
   bean: { minMoisture: 25, maxMoisture: 70, minLight: .7, maxLight: 1 },
   sunflower: { minMoisture: 25, maxMoisture: 70, minLight: .75, maxLight: 1 },
+  daisy: { minMoisture: 25, maxMoisture: 75, minLight: .6, maxLight: 1 },
+  lavender: { minMoisture: 20, maxMoisture: 60, minLight: .7, maxLight: 1 },
   mint: { minMoisture: 35, maxMoisture: 85, minLight: .3, maxLight: .85 },
 };
 
@@ -68,7 +70,7 @@ export const TERRARIUM_FLOWER_BLOOM_HOURS = 18;
 
 /** Flowers follow accumulated suitable daylight growth; fern and moss do not flower. */
 export function flowerStage(plant: { species: string; growthHours?: number; health: number; moisture: number; dry: boolean }): 'bud' | 'bloom' | undefined {
-  if (plant.species !== 'clover' && plant.species !== 'basil' && plant.species !== 'bean' && plant.species !== 'sunflower' && plant.species !== 'mint') return;
+  if (plant.species !== 'clover' && plant.species !== 'basil' && plant.species !== 'bean' && plant.species !== 'sunflower' && plant.species !== 'mint' && plant.species !== 'daisy' && plant.species !== 'lavender') return;
   if (hasSeedHead(plant)) return;
   const needs = TERRARIUM_PLANT_REQUIREMENTS[plant.species];
   if (plant.health < TERRARIUM_PLANT_RECOVERED_HEALTH || plant.dry || plant.moisture < needs.minMoisture || plant.moisture > needs.maxMoisture) return;

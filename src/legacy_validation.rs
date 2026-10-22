@@ -204,6 +204,37 @@ mod tests {
         assert!(validator.validate(&state).await.is_err());
     }
     #[tokio::test]
+    async fn pollination_and_aquatic_nurseries_round_trip_without_requiring_new_fields() {
+        let validator = LegacyValidator::default();
+        let mut state = land();
+        state["plants"][0]["species"] = serde_json::json!("daisy");
+        state["plants"][0]["pollination"] = serde_json::json!(3);
+        state["plants"][1]["species"] = serde_json::json!("lavender");
+        state["bugs"] = serde_json::json!([{
+            "id": "bee", "species": "bee", "x": 1, "y": 1, "ageHours": 1, "energy": 80,
+            "pollen": {"species": "daisy", "plantId": "flower"}
+        }]);
+        assert_eq!(validator.validate(&state).await.unwrap(), state);
+        state["plants"][0]["pollination"] = serde_json::json!(4);
+        assert!(validator.validate(&state).await.is_err());
+        let fixtures: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/reports.json")).unwrap();
+        let mut water = fixtures["water"].clone();
+        water["fish"] = serde_json::json!([{ "id": "juvenile", "species": "neon_tetra", "x": 1, "y": 1, "energy": 70, "health": 100, "ageHours": 1, "juvenile": true }]);
+        water["eggs"] = serde_json::json!([{
+            "id": "fish-egg", "species": "neon_tetra", "x": 1, "y": 1,
+            "laidAtMs": water["updatedAtMs"], "incubationHours": 2, "health": 90
+        }]);
+        assert_eq!(validator.validate(&water).await.unwrap(), water);
+        water["eggs"][0]["incubationHours"] = serde_json::json!(-1);
+        assert!(validator.validate(&water).await.is_err());
+        assert_eq!(
+            validator.validate(&fixtures["water"]).await.unwrap(),
+            fixtures["water"]
+        );
+        assert_eq!(validator.validate(&land()).await.unwrap(), land());
+    }
+    #[tokio::test]
     async fn cancelling_validation_cannot_deliver_its_reply_to_the_next_request() {
         let validator = LegacyValidator {
             worker: Arc::new(Mutex::new(Some(scripted(

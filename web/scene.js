@@ -25,6 +25,8 @@ var TERRARIUM_PLANT_REQUIREMENTS = {
   basil: { minMoisture: 30, maxMoisture: 75, minLight: 0.65, maxLight: 1 },
   bean: { minMoisture: 25, maxMoisture: 70, minLight: 0.7, maxLight: 1 },
   sunflower: { minMoisture: 25, maxMoisture: 70, minLight: 0.75, maxLight: 1 },
+  daisy: { minMoisture: 25, maxMoisture: 75, minLight: 0.6, maxLight: 1 },
+  lavender: { minMoisture: 20, maxMoisture: 60, minLight: 0.7, maxLight: 1 },
   mint: { minMoisture: 35, maxMoisture: 85, minLight: 0.3, maxLight: 0.85 }
 };
 function daylight(habitat, x, y) {
@@ -44,7 +46,7 @@ function hasSeedHead(plant) {
 var TERRARIUM_FLOWER_BUD_HOURS = 12;
 var TERRARIUM_FLOWER_BLOOM_HOURS = 18;
 function flowerStage(plant) {
-  if (plant.species !== "clover" && plant.species !== "basil" && plant.species !== "bean" && plant.species !== "sunflower" && plant.species !== "mint") return;
+  if (plant.species !== "clover" && plant.species !== "basil" && plant.species !== "bean" && plant.species !== "sunflower" && plant.species !== "mint" && plant.species !== "daisy" && plant.species !== "lavender") return;
   if (hasSeedHead(plant)) return;
   const needs = TERRARIUM_PLANT_REQUIREMENTS[plant.species];
   if (plant.health < TERRARIUM_PLANT_RECOVERED_HEALTH || plant.dry || plant.moisture < needs.minMoisture || plant.moisture > needs.maxMoisture) return;
@@ -53,30 +55,12 @@ function flowerStage(plant) {
 }
 
 // src/flight.ts
-var TERRARIUM_FLY_SPECIES = ["fruit_fly", "mosquito", "moth"];
+var TERRARIUM_FLY_SPECIES = ["fruit_fly", "mosquito", "moth", "bee", "butterfly"];
 function isFlying(species) {
   return TERRARIUM_FLY_SPECIES.includes(species);
 }
 
-// ../terrarium-renderer/dist/types.js
-function sceneSize(scene) {
-  return scene.gridSize ?? 5;
-}
-
-// ../terrarium-renderer/dist/geometry.js
-var LAND_SURFACE = { x: 84, y: 204, width: 632, height: 216 };
-var WATER_SURFACE = { x: 90, y: 128, width: 620, height: 286 };
-function cellPosition(surface, x, y, size) {
-  return { x: surface.x + (x + 0.5) * surface.width / size, y: surface.y + (y + 0.5) * surface.height / size };
-}
-function plotPosition(x, y, size = 5) {
-  return cellPosition(LAND_SURFACE, x, y, size);
-}
-function residentScale(size) {
-  return 5 / size;
-}
-
-// ../terrarium-renderer/dist/plant-appearance.js
+// ../../scratch/phase-three/renderer-consumer/package/dist/plant-appearance.js
 function blend(from, to, amount) {
   const color = (hex, offset) => Number.parseInt(hex.slice(offset, offset + 2), 16);
   return "#" + [1, 3, 5].map((offset) => Math.round(color(from, offset) * (1 - amount) + color(to, offset) * amount).toString(16).padStart(2, "0")).join("");
@@ -141,8 +125,147 @@ function drawLeaf(g, appearance, x, y, rx, ry, angle, index, shape = "oval") {
   g.restore();
 }
 
-// ../terrarium-renderer/dist/neighbors.js
+// ../../scratch/phase-three/renderer-consumer/package/dist/pollinators.js
+function drawMeadowPlant(g, plant, x, base, night, flowersOnly = false) {
+  if (plant.species !== "daisy" && plant.species !== "lavender")
+    return false;
+  const appearance = plantAppearance(plant, night), height = 15 + plant.stage * 17;
+  g.save();
+  g.translate(x, base);
+  g.lineCap = "round";
+  for (const side of plant.stage > 1 ? [-1, 0, 1] : [0]) {
+    const tx = side * 15, top = -height + Math.abs(side) * 12;
+    if (!flowersOnly) {
+      g.strokeStyle = appearance.stem;
+      g.lineWidth = 2;
+      g.beginPath();
+      g.moveTo(0, 0);
+      g.quadraticCurveTo(tx * 0.6, top * 0.5, tx, top);
+      g.stroke();
+      for (const direction of [-1, 1])
+        drawLeaf(g, appearance, tx * 0.5 + direction * 8, top * 0.5 + appearance.wilt * 6, plant.species === "lavender" ? 10 : 12, plant.species === "lavender" ? 2 : 4, direction * -0.5, side + direction + 3, "pointed");
+    }
+    if (!plant.flower)
+      continue;
+    if (plant.species === "daisy") {
+      if (plant.flower === "bloom") {
+        for (let i = 0; i < 12; i++) {
+          const angle = i * Math.PI / 6;
+          g.fillStyle = night ? "#d5ddd4" : i % 2 ? "#fffdf0" : "#e5efe8";
+          g.beginPath();
+          g.ellipse(tx + Math.cos(angle) * 9, top + Math.sin(angle) * 9, 7, 2.6, angle, 0, Math.PI * 2);
+          g.fill();
+        }
+        g.fillStyle = "#e4b34d";
+        g.beginPath();
+        g.arc(tx, top, 5, 0, Math.PI * 2);
+        g.fill();
+        g.fillStyle = "#f8d678";
+        g.beginPath();
+        g.arc(tx - 1, top - 1, 2, 0, Math.PI * 2);
+        g.fill();
+      } else {
+        g.fillStyle = "#96b77c";
+        g.beginPath();
+        g.ellipse(tx, top, 4, 7, -0.2, 0, Math.PI * 2);
+        g.fill();
+      }
+    } else {
+      for (let row = 0; row < (plant.flower === "bloom" ? 6 : 3); row++)
+        for (const direction of [-1, 1]) {
+          g.fillStyle = plant.flower === "bud" ? "#9c96b8" : row % 2 ? "#c6b4e9" : "#9275bb";
+          g.beginPath();
+          g.ellipse(tx + direction * (3.5 - row * 0.3), top - row * 4, 3, 3.6, direction * 0.65, 0, Math.PI * 2);
+          g.fill();
+        }
+    }
+  }
+  g.restore();
+  return true;
+}
+function drawPollinator(g, species, x, y, night) {
+  g.save();
+  g.translate(x, y);
+  if (species === "butterfly") {
+    for (const side of [-1, 1]) {
+      g.fillStyle = night ? "#ba937b" : "#e6a06d";
+      g.strokeStyle = "#65575e";
+      g.lineWidth = 1.5;
+      g.beginPath();
+      g.ellipse(side * 11, -6, 12, 15, side * 0.5, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+      g.fillStyle = night ? "#9c9eb2" : "#a6bfdb";
+      g.beginPath();
+      g.ellipse(side * 10, 10, 10, 10, -side * 0.4, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+      g.fillStyle = "#f9dfad";
+      g.beginPath();
+      g.arc(side * 14, -7, 4, 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = "#68566a";
+      g.beginPath();
+      g.arc(side * 14, -7, 2, 0, Math.PI * 2);
+      g.fill();
+    }
+  } else {
+    g.fillStyle = "#e0f0edcf";
+    for (const side of [-1, 1]) {
+      g.beginPath();
+      g.ellipse(side * 8, -5, 8, 5, -side * 0.6, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.fillStyle = night ? "#bc995a" : "#e9bf63";
+    g.beginPath();
+    g.ellipse(0, 4, 7, 10, 0, 0, Math.PI * 2);
+    g.fill();
+    g.save();
+    g.beginPath();
+    g.ellipse(0, 4, 7, 10, 0, 0, Math.PI * 2);
+    g.clip();
+    g.fillStyle = "#625647";
+    g.fillRect(-8, 0, 16, 3);
+    g.fillRect(-8, 7, 16, 3);
+    g.restore();
+  }
+  g.fillStyle = "#4e4a46";
+  g.beginPath();
+  g.ellipse(0, species === "bee" ? -7 : 2, species === "bee" ? 5 : 2.5, species === "bee" ? 5 : 14, 0, 0, Math.PI * 2);
+  g.fill();
+  g.strokeStyle = "#4e4a46";
+  g.lineWidth = 1;
+  for (const side of [-1, 1]) {
+    g.beginPath();
+    g.moveTo(side, -10);
+    g.quadraticCurveTo(side * 3, -18, side * 6, -18);
+    g.stroke();
+  }
+  g.restore();
+}
+
+// ../../scratch/phase-three/renderer-consumer/package/dist/types.js
+function sceneSize(scene) {
+  return scene.gridSize ?? 5;
+}
+
+// ../../scratch/phase-three/renderer-consumer/package/dist/geometry.js
+var LAND_SURFACE = { x: 84, y: 204, width: 632, height: 216 };
+var WATER_SURFACE = { x: 90, y: 128, width: 620, height: 286 };
+function cellPosition(surface, x, y, size) {
+  return { x: surface.x + (x + 0.5) * surface.width / size, y: surface.y + (y + 0.5) * surface.height / size };
+}
+function plotPosition(x, y, size = 5) {
+  return cellPosition(LAND_SURFACE, x, y, size);
+}
+function residentScale(size) {
+  return 5 / size;
+}
+
+// ../../scratch/phase-three/renderer-consumer/package/dist/neighbors.js
 function drawNeighborPlant(g, plant, x, base, night, flowersOnly = false) {
+  if (drawMeadowPlant(g, plant, x, base, night, flowersOnly))
+    return true;
   if (plant.species !== "sunflower" && plant.species !== "mint")
     return false;
   const height = 13 + plant.stage * 20;
@@ -300,7 +423,7 @@ function drawLadybug(g, x, y, night) {
   g.restore();
 }
 
-// ../terrarium-renderer/dist/flowers.js
+// ../../scratch/phase-three/renderer-consumer/package/dist/flowers.js
 function drawPlantFlowers(g, plant, x, y, night) {
   const stage = plant.flower;
   if (!stage && !plant.seedHead)
@@ -388,7 +511,7 @@ function drawPlantFlowers(g, plant, x, y, night) {
   g.restore();
 }
 
-// ../terrarium-renderer/dist/nest-viewer.js
+// ../../scratch/phase-three/renderer-consumer/package/dist/nest-viewer.js
 var NEST_SIZE = 4;
 var STYLE = `
 .tn-dialog{box-sizing:border-box;width:min(720px,calc(100vw - 24px));max-height:calc(100dvh - 32px);padding:0;border:1px solid #c0ac85;border-radius:24px;background:#f7f1e4;color:#473c2e;box-shadow:0 30px 120px #17170e55;font:14px/1.5 system-ui,sans-serif;overflow:auto}
@@ -655,7 +778,7 @@ function createNestViewer(canvas, language = "zh") {
   };
 }
 
-// ../terrarium-renderer/dist/nest-scene.js
+// ../../scratch/phase-three/renderer-consumer/package/dist/nest-scene.js
 function drawAntNest(g, x, y, night) {
   g.save();
   g.fillStyle = "rgba(35,25,18,.2)";
@@ -691,7 +814,7 @@ function drawAntNest(g, x, y, night) {
   g.restore();
 }
 
-// ../terrarium-renderer/dist/scene.js
+// ../../scratch/phase-three/renderer-consumer/package/dist/scene.js
 function bugPositions(bugs, positions = /* @__PURE__ */ new Map(), size = 5) {
   const groups = /* @__PURE__ */ new Map();
   for (const bug of bugs) {
@@ -1003,7 +1126,9 @@ function drawScene(canvas, state, positions = /* @__PURE__ */ new Map(), hits = 
     g.beginPath();
     g.ellipse(x, y + 9, 14, 4, 0, 0, Math.PI * 2);
     g.fill();
-    if (bug.flying) {
+    if (bug.species === "bee" || bug.species === "butterfly") {
+      drawPollinator(g, bug.species, x, y, night);
+    } else if (bug.flying) {
       g.fillStyle = bug.species === "moth" ? "#d9bfa1" : "rgba(228,246,247,.85)";
       const span = bug.species === "moth" ? 12 : bug.species === "mosquito" ? 8 : 7;
       for (const side of [-1, 1]) {
@@ -1217,7 +1342,7 @@ function createScene(canvas, language = "zh") {
   };
 }
 
-// ../terrarium-renderer/dist/water-residents.js
+// ../../scratch/phase-three/renderer-consumer/package/dist/water-residents.js
 function drawWaterPlant(g, plant, now, night) {
   const appearance = plantAppearance(plant, night), height = 22 + plant.stage * 9;
   const sway = Math.sin(now / 1600) * 2;
@@ -1400,7 +1525,7 @@ function drawWaterFish(g, species, now, night) {
   g.fill();
 }
 
-// ../terrarium-renderer/dist/water-scene.js
+// ../../scratch/phase-three/renderer-consumer/package/dist/water-scene.js
 function createWaterScene(canvas) {
   let state;
   let old = /* @__PURE__ */ new Map();
@@ -1514,6 +1639,24 @@ function createWaterScene(canvas) {
         }
         g.restore();
       }
+      for (const [index, egg] of (state.eggs ?? []).entries()) {
+        const p = position(egg.x, egg.y);
+        g.save();
+        g.translate(p.x + index % 3 * 7 - 7, p.y + 12);
+        g.scale(scale, scale);
+        g.fillStyle = "#f5e7c577";
+        g.strokeStyle = "#e6efdd";
+        g.lineWidth = 1;
+        g.beginPath();
+        g.ellipse(0, 0, 5, 6, 0.2, 0, Math.PI * 2);
+        g.fill();
+        g.stroke();
+        g.fillStyle = egg.health < 30 ? "#b38f78" : "#9b8663";
+        g.beginPath();
+        g.arc(0, 0, 1.2 + Math.min(1, egg.incubationHours / 4) * 1.5, 0, Math.PI * 2);
+        g.fill();
+        g.restore();
+      }
       const points = locations(now);
       for (const fish of state.fish) {
         const p = position(points.get(fish.id).x, points.get(fish.id).y);
@@ -1527,6 +1670,8 @@ function createWaterScene(canvas) {
         g.scale(scale, scale);
         g.translate(-p.x, -p.y);
         g.translate(p.x, p.y);
+        if (fish.juvenile)
+          g.scale(0.55, 0.55);
         drawWaterFish(g, fish.species, now, night);
         g.restore();
       }
@@ -1672,7 +1817,7 @@ function aquaticFlower(plant) {
 function createWaterScene2(canvas) {
   const renderer = createWaterScene(canvas);
   return { setState(state) {
-    renderer.setState({ phase: state.phase, gridSize: capacity(state).size, facilities: state.facilities, oxygen: state.oxygen, cleanliness: state.cleanliness, plants: state.plants.map((p) => ({ ...p, flower: aquaticFlower(p) })), fish: state.fish, food: state.food });
+    renderer.setState({ phase: state.phase, gridSize: capacity(state).size, facilities: state.facilities, oxygen: state.oxygen, cleanliness: state.cleanliness, plants: state.plants.map((p) => ({ ...p, flower: aquaticFlower(p) })), fish: state.fish, eggs: state.eggs, food: state.food });
   }, dispose() {
     renderer.dispose();
   } };

@@ -918,7 +918,7 @@ async fn forum_and_logo_controls_require_admin_and_support_immediate_schedule_an
     );
     for (route, input) in [
         ("forum", json!({"enabled":true})),
-        ("logo", json!({"version":"0.8.7"})),
+        ("logo", json!({"version":"0.8.10"})),
     ] {
         assert_eq!(
             request(
@@ -934,7 +934,7 @@ async fn forum_and_logo_controls_require_admin_and_support_immediate_schedule_an
         );
     }
     assert_eq!(s.controls(now_ms()).unwrap()["forum"]["enabled"], true);
-    assert_eq!(s.controls(now_ms()).unwrap()["logo"]["version"], "0.8.7");
+    assert_eq!(s.controls(now_ms()).unwrap()["logo"]["version"], "0.8.10");
 }
 
 #[tokio::test]

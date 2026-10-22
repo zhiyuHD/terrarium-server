@@ -29,7 +29,7 @@ export function restoreCollected(state: TerrariumState | AquariumState, id: stri
   const specimen = { ...structuredClone(entry.specimen), x, y };
   if ('fish' in state) {
     if (entry.kind === 'fish') {
-      if (state.fish.length >= capacity(state).organisms) throw new Error('Fish capacity reached'); state.fish.push(specimen as FishState);
+      if (state.fish.length + (state.eggs?.length ?? 0) >= capacity(state).organisms) throw new Error('Fish capacity reached'); state.fish.push(specimen as FishState);
     } else if (entry.kind === 'aquatic') {
       if (state.plants.length >= capacity(state).organisms || state.plants.some(p => p.x === x && p.y === y)) throw new Error('Aquatic capacity or plot occupied: select a cell without aquatic plants; the specimen remains in collection'); state.plants.push(specimen as AquaticPlantState);
     } else throw new Error('Collection habitat mismatch');
