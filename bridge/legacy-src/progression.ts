@@ -11,6 +11,7 @@ export const TERRARIUM_LEVELS = [
 export const TERRARIUM_WATER_LEVELS = TERRARIUM_LEVELS.map((level, index) => ({ ...level, requiredScore: [0, 120, 240, 360][index] }));
 export function expansionLevels(state: DevelopmentState) { return 'kind' in state && state.kind === 'water' ? TERRARIUM_WATER_LEVELS : TERRARIUM_LEVELS; }
 export const TERRARIUM_FACILITIES = {
+  compost_bin: { habitat: 'land', level: 2, name: '堆肥桶', effect: '每株植物换 1 份肥料；每份立即增加指定格作物 2 小时生长，可连续施用，无冷却。' },
   mulch: { habitat: 'land', level: 2, name: '保湿覆盖', effect: '全箱土壤蒸发减少 25%；不改变渗透。' },
   shade: { habitat: 'land', level: 3, name: '遮阴棚', effect: '所在格与上下左右的日光乘以 0.6，可移动或关闭。' },
   grow_light: { habitat: 'land', level: 4, name: '育苗灯', effect: '白天将所在格与上下左右的光照提高到至少 0.75；夜晚仍不生长。' },
@@ -95,7 +96,7 @@ export function development(state: State) {
 export function validDevelopment(value: DevelopmentState, habitat: 'land' | 'water'): boolean {
   const p = value.progression;
   if (p !== undefined && (!p || (p.scoreVersion !== undefined && p.scoreVersion !== 1 && p.scoreVersion !== TERRARIUM_SCORE_VERSION) || !TERRARIUM_LEVELS.some(l => l.level === p.level && Number.isSafeInteger(p.peakScore) && p.peakScore >= 0) || !Number.isInteger(p.guideStep) || p.guideStep < 0 || p.guideStep > LAND_LETTERS.length || typeof p.guideSkipped !== 'boolean' || !Array.isArray(p.actions) || p.actions.length > ACTIONS.length || new Set(p.actions).size !== p.actions.length || !p.actions.every(a => ACTIONS.includes(a)))) return false;
-  return value.facilities === undefined || Array.isArray(value.facilities) && value.facilities.length <= 3 && new Set(value.facilities.map(f => f?.kind)).size === value.facilities.length && value.facilities.every(f => f && Object.hasOwn(TERRARIUM_FACILITIES, f.kind) && TERRARIUM_FACILITIES[f.kind].habitat === habitat && capacity(value).level >= TERRARIUM_FACILITIES[f.kind].level && inHabitat(value, f.x, f.y) && typeof f.enabled === 'boolean');
+  return value.facilities === undefined || Array.isArray(value.facilities) && value.facilities.length <= Object.values(TERRARIUM_FACILITIES).filter(f => f.habitat === habitat).length && new Set(value.facilities.map(f => f?.kind)).size === value.facilities.length && value.facilities.every(f => f && Object.hasOwn(TERRARIUM_FACILITIES, f.kind) && TERRARIUM_FACILITIES[f.kind].habitat === habitat && capacity(value).level >= TERRARIUM_FACILITIES[f.kind].level && inHabitat(value, f.x, f.y) && typeof f.enabled === 'boolean');
 }
 
 export function guideHint(state: State) {

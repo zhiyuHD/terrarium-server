@@ -48,7 +48,7 @@ cargo clippy --all-targets --locked -- -D warnings
 
 公网页面 Logo 由 `logo` 云控选择 0.8.6「闲看生机」或 0.8.7「新邻初见 · 第一阶段」，支持定时切换，打开的页面每分钟及恢复可见时同步。0.8.7 使用粗体 SVG 字标：MiSans Bold 字形转为轮廓，在笔画内融入新芽、瓢虫斑点和葵花金色。支持深浅主题、小屏幕和减少动态效果设置，无额外图片或字体请求。字形来自 Xiaomi MiSans 字体包；字体许可证保留在 `web/admin/assets/MiSans-LICENSE.pdf`。
 
-`web/` 的公共页面、渲染 bundle 和 `web/admin/` 管理台来自生态箱 0.8.7 的 `server/` 与 `dist/console/`；代码按 MIT 许可证保留，字体与图标许可证位于 `web/admin/assets/`。管理台内存标签注明主进程范围。
+`web/` 的公共页面和 `web/admin/` 管理台来自生态箱 0.8.7 的 `server/` 与 `dist/console/`；`web/scene.js` 渲染 bundle 兼容 0.8.8 第二阶段的新鱼草、睡莲花和堆肥桶；代码按 MIT 许可证保留，字体与图标许可证位于 `web/admin/assets/`。管理台内存标签注明主进程范围。
 
 箱子与凭据按行存储；公告、反馈、云控和协议通知保留兼容 JSON 文档，更新在 SQLite 写事务中完成。公告和反馈各有 2000 条上限。此阶段保持 schema 1，不增加磁盘格式迁移。
 

@@ -58,12 +58,12 @@ function isFlying(species) {
   return TERRARIUM_FLY_SPECIES.includes(species);
 }
 
-// ../../scratch/terrarium-0805/renderer-source/dist/types.js
+// ../terrarium-renderer/dist/types.js
 function sceneSize(scene) {
   return scene.gridSize ?? 5;
 }
 
-// ../../scratch/terrarium-0805/renderer-source/dist/geometry.js
+// ../terrarium-renderer/dist/geometry.js
 var LAND_SURFACE = { x: 84, y: 204, width: 632, height: 216 };
 var WATER_SURFACE = { x: 90, y: 128, width: 620, height: 286 };
 function cellPosition(surface, x, y, size) {
@@ -76,7 +76,7 @@ function residentScale(size) {
   return 5 / size;
 }
 
-// ../../scratch/terrarium-0805/renderer-source/dist/plant-appearance.js
+// ../terrarium-renderer/dist/plant-appearance.js
 function blend(from, to, amount) {
   const color = (hex, offset) => Number.parseInt(hex.slice(offset, offset + 2), 16);
   return "#" + [1, 3, 5].map((offset) => Math.round(color(from, offset) * (1 - amount) + color(to, offset) * amount).toString(16).padStart(2, "0")).join("");
@@ -141,7 +141,7 @@ function drawLeaf(g, appearance, x, y, rx, ry, angle, index, shape = "oval") {
   g.restore();
 }
 
-// ../../scratch/terrarium-0805/renderer-source/dist/neighbors.js
+// ../terrarium-renderer/dist/neighbors.js
 function drawNeighborPlant(g, plant, x, base, night, flowersOnly = false) {
   if (plant.species !== "sunflower" && plant.species !== "mint")
     return false;
@@ -300,7 +300,7 @@ function drawLadybug(g, x, y, night) {
   g.restore();
 }
 
-// ../../scratch/terrarium-0805/renderer-source/dist/flowers.js
+// ../terrarium-renderer/dist/flowers.js
 function drawPlantFlowers(g, plant, x, y, night) {
   const stage = plant.flower;
   if (!stage && !plant.seedHead)
@@ -388,7 +388,7 @@ function drawPlantFlowers(g, plant, x, y, night) {
   g.restore();
 }
 
-// ../../scratch/terrarium-0805/renderer-source/dist/nest-viewer.js
+// ../terrarium-renderer/dist/nest-viewer.js
 var NEST_SIZE = 4;
 var STYLE = `
 .tn-dialog{box-sizing:border-box;width:min(720px,calc(100vw - 24px));max-height:calc(100dvh - 32px);padding:0;border:1px solid #c0ac85;border-radius:24px;background:#f7f1e4;color:#473c2e;box-shadow:0 30px 120px #17170e55;font:14px/1.5 system-ui,sans-serif;overflow:auto}
@@ -655,7 +655,7 @@ function createNestViewer(canvas, language = "zh") {
   };
 }
 
-// ../../scratch/terrarium-0805/renderer-source/dist/nest-scene.js
+// ../terrarium-renderer/dist/nest-scene.js
 function drawAntNest(g, x, y, night) {
   g.save();
   g.fillStyle = "rgba(35,25,18,.2)";
@@ -691,7 +691,7 @@ function drawAntNest(g, x, y, night) {
   g.restore();
 }
 
-// ../../scratch/terrarium-0805/renderer-source/dist/scene.js
+// ../terrarium-renderer/dist/scene.js
 function bugPositions(bugs, positions = /* @__PURE__ */ new Map(), size = 5) {
   const groups = /* @__PURE__ */ new Map();
   for (const bug of bugs) {
@@ -884,7 +884,34 @@ function drawScene(canvas, state, positions = /* @__PURE__ */ new Map(), hits = 
     g.scale(scale, scale);
     g.translate(-x, -y);
     g.globalAlpha = facility.enabled ? 1 : 0.35;
-    if (facility.kind === "mulch") {
+    if (facility.kind === "compost_bin") {
+      g.fillStyle = "#795e40";
+      g.beginPath();
+      g.roundRect(x - 18, y - 30, 36, 37, 5);
+      g.fill();
+      g.strokeStyle = "#b99d6a";
+      g.lineWidth = 2;
+      for (const dy of [-23, -13, -3]) {
+        g.beginPath();
+        g.moveTo(x - 14, y + dy);
+        g.lineTo(x + 14, y + dy);
+        g.stroke();
+      }
+      g.fillStyle = "#4d6547";
+      g.beginPath();
+      g.ellipse(x, y - 30, 19, 6, 0, 0, Math.PI * 2);
+      g.fill();
+      g.strokeStyle = "#bdd29a";
+      g.lineWidth = 2;
+      g.beginPath();
+      g.moveTo(x, y - 31);
+      g.lineTo(x, y - 40);
+      g.stroke();
+      g.fillStyle = "#91b77b";
+      g.beginPath();
+      g.ellipse(x + 4, y - 38, 6, 3, -0.5, 0, Math.PI * 2);
+      g.fill();
+    } else if (facility.kind === "mulch") {
       g.fillStyle = "#b79157";
       g.beginPath();
       g.ellipse(x, y, 24, 10, 0, 0, Math.PI * 2);
@@ -1190,7 +1217,190 @@ function createScene(canvas, language = "zh") {
   };
 }
 
-// ../../scratch/terrarium-0805/renderer-source/dist/water-scene.js
+// ../terrarium-renderer/dist/water-residents.js
+function drawWaterPlant(g, plant, now, night) {
+  const appearance = plantAppearance(plant, night), height = 22 + plant.stage * 9;
+  const sway = Math.sin(now / 1600) * 2;
+  g.strokeStyle = appearance.stem;
+  g.fillStyle = appearance.leaf;
+  g.lineWidth = 2;
+  if (plant.species === "duckweed") {
+    for (let i = 0; i < 3 + plant.stage; i++) {
+      const x = (i % 3 - 1) * 14 + sway, y = Math.floor(i / 3) * 10 - 8;
+      g.strokeStyle = appearance.stem;
+      g.lineWidth = 1;
+      g.beginPath();
+      g.moveTo(x, y);
+      g.quadraticCurveTo(x + sway, y + 15, x - 4, y + 25);
+      g.stroke();
+      for (const dx of [-4, 4]) {
+        g.fillStyle = dx < 0 ? appearance.leaf : appearance.youngLeaf;
+        g.beginPath();
+        g.ellipse(x + dx, y, 7, 4.5, dx / 20, 0, Math.PI * 2);
+        g.fill();
+      }
+      g.fillStyle = appearance.vein;
+      g.beginPath();
+      g.arc(x, y - 1, 1, 0, Math.PI * 2);
+      g.fill();
+    }
+    return;
+  }
+  if (plant.species === "waterlily") {
+    g.strokeStyle = appearance.stem;
+    g.lineWidth = 2;
+    g.beginPath();
+    g.moveTo(0, 22);
+    g.quadraticCurveTo(-8, 0, sway, -height + 22);
+    g.stroke();
+    for (const dx of [-13, 12]) {
+      g.fillStyle = appearance.leaf;
+      g.beginPath();
+      g.ellipse(dx, -height + 26, 17, 7, dx / 90, 0.2, Math.PI * 2 - 0.2);
+      g.lineTo(dx, -height + 26);
+      g.fill();
+      g.strokeStyle = appearance.vein;
+      g.lineWidth = 0.7;
+      g.beginPath();
+      g.moveTo(dx, -height + 26);
+      g.lineTo(dx + 12, -height + 27);
+      g.stroke();
+    }
+    if (plant.flower) {
+      g.save();
+      g.translate(sway, -height + 18);
+      if (plant.flower === "bloom")
+        for (let i = 0; i < 8; i++) {
+          g.save();
+          g.rotate(i * Math.PI / 4);
+          g.fillStyle = i % 2 ? "#f4d5e4" : "#d991b8";
+          g.beginPath();
+          g.ellipse(0, -6, 3.8, 9, 0, 0, Math.PI * 2);
+          g.fill();
+          g.restore();
+        }
+      else {
+        g.fillStyle = "#d99dbb";
+        g.beginPath();
+        g.ellipse(0, -3, 4, 8, 0.15, 0, Math.PI * 2);
+        g.fill();
+      }
+      g.fillStyle = "#f2d37b";
+      g.beginPath();
+      g.arc(0, -1, plant.flower === "bloom" ? 4 : 2, 0, Math.PI * 2);
+      g.fill();
+      g.restore();
+    }
+    return;
+  }
+  for (let strand = -1; strand <= 1; strand++) {
+    const x = strand * 11, top = 22 - height + Math.abs(strand) * 6;
+    g.strokeStyle = appearance.stem;
+    g.lineWidth = plant.species === "algae" ? 4 : 2;
+    g.beginPath();
+    g.moveTo(x, 22);
+    g.quadraticCurveTo(x + strand * 7 + sway, 0, x + sway, top);
+    g.stroke();
+    if (plant.species === "algae")
+      continue;
+    for (let y = 14; y > top + 3; y -= 9) {
+      g.strokeStyle = appearance.leaf;
+      g.fillStyle = appearance.youngLeaf;
+      if (plant.species === "hornwort") {
+        g.lineWidth = 1.4;
+        for (let angle = 0; angle < 5; angle++) {
+          const dx = Math.cos(angle * Math.PI / 2) * 10;
+          g.beginPath();
+          g.moveTo(x + sway / 2, y);
+          g.lineTo(x + dx + sway, y - 7);
+          g.stroke();
+          g.beginPath();
+          g.moveTo(x + dx * 0.65 + sway, y - 5);
+          g.lineTo(x + dx * 0.85 + sway - 2, y - 9);
+          g.stroke();
+        }
+      } else
+        for (const side of [-1, 1]) {
+          g.beginPath();
+          g.ellipse(x + side * 5 + sway / 2, y - 2, 7, 3, side * -0.6, 0, Math.PI * 2);
+          g.fill();
+        }
+    }
+  }
+}
+function drawWaterFish(g, species, now, night) {
+  const neon = species === "neon_tetra", cory = species === "corydoras";
+  const tail = Math.sin(now / 220) * 2, length = species === "perch" ? 24 : neon ? 17 : 18;
+  const color = species === "goldfish" ? "#f3a545" : species === "perch" ? "#718f78" : cory ? "#d4c09a" : neon ? "#8dcbd0" : "#b9b3e5";
+  g.fillStyle = color;
+  g.beginPath();
+  g.moveTo(-length + 3, 0);
+  g.lineTo(-length - 12, -10 + tail);
+  g.lineTo(-length - 12, 10 + tail);
+  g.closePath();
+  g.fill();
+  g.beginPath();
+  g.ellipse(0, 0, length, cory ? 9 : neon ? 7 : 11, 0, 0, Math.PI * 2);
+  g.fill();
+  if (neon) {
+    g.strokeStyle = night ? "#66e5f4" : "#228fae";
+    g.lineWidth = 3;
+    g.beginPath();
+    g.moveTo(-13, -2);
+    g.lineTo(11, -2);
+    g.stroke();
+    g.strokeStyle = "#ce5965";
+    g.beginPath();
+    g.moveTo(-14, 3);
+    g.lineTo(1, 3);
+    g.stroke();
+  } else if (cory) {
+    g.fillStyle = "#706655";
+    for (let i = 0; i < 5; i++) {
+      g.beginPath();
+      g.ellipse(-9 + i * 4, i % 2 ? 3 : -2, 2.5, 2, 0.2, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.strokeStyle = "#e9dfc7";
+    g.lineWidth = 1;
+    for (const dy of [3, 7]) {
+      g.beginPath();
+      g.moveTo(14, 3);
+      g.quadraticCurveTo(22, dy, 23, dy + 4);
+      g.stroke();
+    }
+    g.fillStyle = "#a79776";
+    g.beginPath();
+    g.moveTo(-5, -6);
+    g.lineTo(-1, -16);
+    g.lineTo(6, -5);
+    g.fill();
+  } else if (species === "perch") {
+    g.strokeStyle = "#425f59";
+    g.lineWidth = 2;
+    for (const x of [-10, -3, 4]) {
+      g.beginPath();
+      g.moveTo(x, -8);
+      g.lineTo(x - 2, 7);
+      g.stroke();
+    }
+  } else if (species === "goldfish") {
+    g.fillStyle = "#ffd285";
+    g.beginPath();
+    g.ellipse(-1, 5, 8, 3, 0.25, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.fillStyle = "#172e38";
+  g.beginPath();
+  g.arc(neon ? 11 : 10, -3, 2, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = "#ffffffba";
+  g.beginPath();
+  g.arc(neon ? 11.5 : 10.5, -3.5, 0.6, 0, Math.PI * 2);
+  g.fill();
+}
+
+// ../terrarium-renderer/dist/water-scene.js
 function createWaterScene(canvas) {
   let state;
   let old = /* @__PURE__ */ new Map();
@@ -1235,29 +1445,13 @@ function createWaterScene(canvas) {
           g.strokeRect(p.x - WATER_SURFACE.width / size / 2, p.y - WATER_SURFACE.height / size / 2, WATER_SURFACE.width / size, WATER_SURFACE.height / size);
         }
       for (const plant of state.plants) {
-        const p = position(plant.x, plant.y), h = 22 + plant.stage * 9;
+        const p = position(plant.x, plant.y);
         g.save();
         g.translate(p.x, p.y);
         g.scale(scale, scale);
         g.translate(-p.x, -p.y);
-        const appearance = plantAppearance(plant, night);
-        g.strokeStyle = appearance.stem;
-        g.lineWidth = 5;
-        for (let strand = -1; strand <= 1; strand++) {
-          g.beginPath();
-          g.moveTo(p.x + strand * 10, p.y + 22);
-          g.quadraticCurveTo(p.x + strand * 18 + Math.sin(now / 1e3) * 2, p.y, p.x + strand * 12, p.y + 22 - h * (1 - appearance.wilt * 0.35));
-          g.stroke();
-          if (plant.species !== "algae")
-            for (let i = 0; i < 2; i++)
-              drawLeaf(g, appearance, p.x + strand * 12 + (i % 2 ? -5 : 5), p.y + 12 - h * (0.25 + i * 0.28), 9, 4, (i % 2 ? -0.5 : 0.5) + appearance.wilt * 0.5, i);
-        }
-        if (plant.species === "waterlily") {
-          g.fillStyle = (plant.health ?? 100) > 35 ? "#e7b8cf" : appearance.leaf;
-          g.beginPath();
-          g.ellipse(p.x, p.y - h + 22, 13, 6, 0, 0, Math.PI * 2);
-          g.fill();
-        }
+        g.translate(p.x, p.y);
+        drawWaterPlant(g, plant, now, night);
         g.restore();
       }
       for (const food of state.food) {
@@ -1332,20 +1526,8 @@ function createWaterScene(canvas) {
         g.translate(p.x, p.y);
         g.scale(scale, scale);
         g.translate(-p.x, -p.y);
-        g.fillStyle = fish.species === "goldfish" ? "#f3a545" : fish.species === "perch" ? "#718f78" : "#b9b3e5";
-        g.beginPath();
-        g.moveTo(p.x - 15, p.y);
-        g.lineTo(p.x - 30, p.y - 12);
-        g.lineTo(p.x - 30, p.y + 12);
-        g.closePath();
-        g.fill();
-        g.beginPath();
-        g.ellipse(p.x, p.y, fish.species === "perch" ? 24 : 18, 11, 0, 0, Math.PI * 2);
-        g.fill();
-        g.fillStyle = "#172e38";
-        g.beginPath();
-        g.arc(p.x + 10, p.y - 3, 2, 0, Math.PI * 2);
-        g.fill();
+        g.translate(p.x, p.y);
+        drawWaterFish(g, fish.species, now, night);
         g.restore();
       }
     }
@@ -1480,11 +1662,17 @@ function createPlaybackControls(container, createRenderer, language = "zh") {
   };
 }
 
+// src/aquatic-habitat.ts
+function aquaticFlower(plant) {
+  if (plant.species !== "waterlily" || plant.health < 35) return void 0;
+  return plant.growthHours >= 18 ? "bloom" : plant.growthHours >= 12 ? "bud" : void 0;
+}
+
 // webui/water-scene.ts
 function createWaterScene2(canvas) {
   const renderer = createWaterScene(canvas);
   return { setState(state) {
-    renderer.setState({ phase: state.phase, gridSize: capacity(state).size, facilities: state.facilities, oxygen: state.oxygen, cleanliness: state.cleanliness, plants: state.plants, fish: state.fish, food: state.food });
+    renderer.setState({ phase: state.phase, gridSize: capacity(state).size, facilities: state.facilities, oxygen: state.oxygen, cleanliness: state.cleanliness, plants: state.plants.map((p) => ({ ...p, flower: aquaticFlower(p) })), fish: state.fish, food: state.food });
   }, dispose() {
     renderer.dispose();
   } };

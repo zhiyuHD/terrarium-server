@@ -143,6 +143,45 @@ mod tests {
         assert_eq!(validator.validate(&land()).await.unwrap(), land());
     }
     #[tokio::test]
+    async fn second_phase_species_and_compost_preserve_old_and_new_reports() {
+        let validator = LegacyValidator::default();
+        let fixtures: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/reports.json")).unwrap();
+        let mut water = fixtures["water"].clone();
+        water["fish"] = serde_json::json!([
+            {"id": "fish-new-neon", "species": "neon_tetra", "x": 1, "y": 1, "energy": 60, "health": 100, "ageHours": 0},
+            {"id": "fish-new-cory", "species": "corydoras", "x": 2, "y": 2, "energy": 60, "health": 100, "ageHours": 0}
+        ]);
+        water["plants"][0]["species"] = serde_json::json!("hornwort");
+        water["plants"][1]["species"] = serde_json::json!("duckweed");
+        assert_eq!(validator.validate(&water).await.unwrap(), water);
+        let mut state = land();
+        state["fertilizer"] = serde_json::json!(12);
+        state["progression"] = serde_json::json!({"level": 2, "peakScore": 120, "scoreVersion": 2, "guideStep": 0, "guideSkipped": false, "actions": []});
+        state["soil"] = serde_json::json!(
+            (0..36)
+                .map(|i| serde_json::json!({"x": i % 6, "y": i / 6, "moisture": 50}))
+                .collect::<Vec<_>>()
+        );
+        state["facilities"] =
+            serde_json::json!([{"kind": "compost_bin", "x": 5, "y": 5, "enabled": true}]);
+        assert_eq!(validator.validate(&state).await.unwrap(), state);
+        for invalid in [
+            serde_json::json!(-1),
+            serde_json::json!(0.5),
+            serde_json::json!("2"),
+            serde_json::json!(9007199254740992u64),
+        ] {
+            state["fertilizer"] = invalid;
+            assert!(validator.validate(&state).await.is_err());
+        }
+        assert_eq!(validator.validate(&land()).await.unwrap(), land());
+        assert_eq!(
+            validator.validate(&fixtures["water"]).await.unwrap(),
+            fixtures["water"]
+        );
+    }
+    #[tokio::test]
     async fn expanded_colonies_preserve_layout_and_old_overlaps_without_simulation() {
         let validator = LegacyValidator::default();
         let mut state = land();

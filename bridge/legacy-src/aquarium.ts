@@ -8,8 +8,9 @@ import { TERRARIUM_MAX_NAME_LENGTH, TERRARIUM_MAX_CATCHUP_MS } from './state.ts'
 import { phase } from './state.ts';
 import { TERRARIUM_MAX_REPLAYS, TERRARIUM_REPLAY_RETENTION_MS } from './replay.ts';
 
-export type FishSpecies = 'guppy' | 'goldfish' | 'perch';
-export type AquaticPlantSpecies = 'waterweed' | 'waterlily' | 'algae';
+import { TERRARIUM_FISH_SPECIES, TERRARIUM_AQUATIC_PLANTS, aquaticBenefits, aquaticFlower, type FishSpecies, type AquaticPlantSpecies } from './aquatic-habitat.ts';
+export { TERRARIUM_FISH_SPECIES, TERRARIUM_AQUATIC_PLANTS, aquaticBenefits, aquaticFlower, type FishSpecies, type AquaticPlantSpecies } from './aquatic-habitat.ts';
+
 export interface FishState { id: string; species: FishSpecies; x: number; y: number; energy: number; health: number; ageHours: number; lastMeal?: { atMs: number; kind: 'fish' | 'food' | 'algae'; id: string } }
 export interface AquaticPlantState { id: string; species: AquaticPlantSpecies; x: number; y: number; health: number; growthHours: number; stage: number }
 export interface FishFood { id: string; x: number; y: number; portions: number; droppedAtMs: number }
@@ -31,14 +32,14 @@ export function newAquarium(nowMs: number): AquariumState {
   return state;
 }
 export function stockFish(state: AquariumState, species: unknown, x: number, y: number): FishState {
-  if (!['guppy', 'goldfish', 'perch'].includes(String(species))) throw new Error('Unknown fish species');
+  if (!(TERRARIUM_FISH_SPECIES as readonly unknown[]).includes(species)) throw new Error('Unknown fish species');
   if (!inHabitat(state, x, y)) throw new Error('Position must be in the current habitat grid');
   if (state.fish.length >= capacity(state).organisms) throw new Error('Fish capacity reached');
   const fish: FishState = { id: `fish-${state.nextId++}`, species: species as FishSpecies, x, y, health: 100, energy: 60, ageHours: 0 };
   state.fish.push(fish); recordAction(state, 'inhabit'); return fish;
 }
 export function plantAquatic(state: AquariumState, species: unknown, x: number, y: number): AquaticPlantState {
-  if (!['waterweed', 'waterlily', 'algae'].includes(String(species))) throw new Error('Unknown aquatic plant species');
+  if (typeof species !== 'string' || !Object.hasOwn(TERRARIUM_AQUATIC_PLANTS, species)) throw new Error('Unknown aquatic plant species');
   if (!inHabitat(state, x, y)) throw new Error('Position must be in the current habitat grid');
   if (state.plants.length >= capacity(state).organisms) throw new Error('Aquatic plant capacity reached');
   if (state.plants.some(plant => plant.x === x && plant.y === y)) throw new Error('That plot already has an aquatic plant');
@@ -83,9 +84,17 @@ function recordHistory(state: AquariumState, recordedAtMs: number): void {
 type PlantDamage = (plant: AquaticPlantState, amount: number, cause: string) => void;
 const label = (value: { id: string; species: string; x: number; y: number }): string => `${value.id}（${value.species}），位置 (${value.x},${value.y})`;
 function actFish(state: AquariumState, fish: FishState, atMs: number, timezone: string, changes: AquariumChange[], damage: PlantDamage): void {
-  const prey = fish.species === 'perch' ? state.fish.filter(other => other.species === 'guppy') : [];
-  const targets = prey.length ? prey : state.food.length ? state.food : fish.species === 'goldfish' && fish.energy < 70 ? state.plants.filter(plant => plant.species === 'algae' && plant.health > 30) : [];
-  const target = [...targets].sort((a, b) => Math.abs(a.x - fish.x) + Math.abs(a.y - fish.y) - Math.abs(b.x - fish.x) - Math.abs(b.y - fish.y) || a.id.localeCompare(b.id))[0];
+  const prey = fish.species === 'perch' ? state.fish.filter(other => other.species === 'guppy' || other.species === 'neon_tetra' && !state.plants.some(p => p.species === 'hornwort' && aquaticBenefits(p) && p.x === other.x && p.y === other.y && (fish.x !== other.x || fish.y !== other.y))) : [];
+  if (fish.species === 'neon_tetra' && fish.energy >= 40 && !state.food.length) {
+    const leader = state.fish.filter(other => other.species === 'neon_tetra').sort((a, b) => a.id.localeCompare(b.id))[0];
+    if (leader !== fish) {
+      const distance = Math.abs(leader.x - fish.x) + Math.abs(leader.y - fish.y);
+      if (distance > 1) { if (fish.x !== leader.x) fish.x += Math.sign(leader.x - fish.x); else fish.y += Math.sign(leader.y - fish.y); }
+      return;
+    }
+  }
+  const targets = prey.length ? prey : state.food.length && (fish.species !== 'corydoras' || fish.energy < 85) ? state.food : (fish.species === 'goldfish' || fish.species === 'corydoras') && fish.energy < 70 ? state.plants.filter(plant => plant.species === 'algae' && plant.health > 30) : [];
+  const target = [...targets].sort((a, b) => (fish.species === 'corydoras' && 'droppedAtMs' in a && 'droppedAtMs' in b ? a.droppedAtMs - b.droppedAtMs : 0) || Math.abs(a.x - fish.x) + Math.abs(a.y - fish.y) - Math.abs(b.x - fish.x) - Math.abs(b.y - fish.y) || a.id.localeCompare(b.id))[0];
   if (!target) {
     const direction = (Math.floor(atMs / TERRARIUM_FISH_ACTION_INTERVAL_MS) + Number(fish.id.split('-')[1])) % 4;
     fish.x = Math.max(0, Math.min(capacity(state).size - 1, fish.x + [1, 0, -1, 0][direction]));
@@ -122,14 +131,16 @@ export function advanceAquarium(state: AquariumState, nowMs: number, timezone: s
     const end = Math.min(nowMs, (Math.floor(start / TERRARIUM_FISH_ACTION_INTERVAL_MS) + 1) * TERRARIUM_FISH_ACTION_INTERVAL_MS);
     const hours = (end - start) / HOUR_MS;
     const day = phase(start, timezone) === 'day';
-    state.oxygen = clamp(state.oxygen + ((hasFacility(state, 'air_stone') ? 2 : 0) + 1 + state.plants.reduce((n, p) => n + (day ? p.species === 'algae' ? 1.1 : p.species === 'waterlily' ? .5 : .8 : p.species === 'waterlily' ? -.1 : p.species === 'algae' ? -.3 : -.2), 0) + (state.plants.some(p => p.species === 'waterweed' && p.health >= 60) && state.plants.some(p => p.species === 'waterlily' && p.health >= 60) ? .2 : 0) - state.fish.length * .3) * hours);
-    state.cleanliness = clamp(state.cleanliness + ((hasFacility(state, 'filter') ? 2 : 0) - (state.fish.length * .15 + state.food.reduce((n, food) => n + food.portions, 0) * .05)) * hours);
+    state.oxygen = clamp(state.oxygen + ((hasFacility(state, 'air_stone') ? 2 : 0) + 1 + state.plants.reduce((n, p) => n + (day ? TERRARIUM_AQUATIC_PLANTS[p.species].dayOxygen : TERRARIUM_AQUATIC_PLANTS[p.species].nightOxygen), 0) + (state.plants.some(p => p.species === 'waterweed' && p.health >= 60) && state.plants.some(p => p.species === 'waterlily' && p.health >= 60) ? .2 : 0) - state.fish.length * .3) * hours);
+    state.cleanliness = clamp(state.cleanliness + ((hasFacility(state, 'filter') ? 2 : 0) + state.plants.reduce((n, p) => n + (aquaticBenefits(p) ? TERRARIUM_AQUATIC_PLANTS[p.species].purification : 0), 0) - (state.fish.length * .15 + state.food.reduce((n, food) => n + food.portions, 0) * .05)) * hours);
     state.food = state.food.filter(food => food.droppedAtMs + 6 * HOUR_MS > end);
     for (const plant of state.plants) {
+      const previousFlower = aquaticFlower(plant);
       if (day && state.cleanliness >= 40) plant.growthHours += hours * (hasFacility(state, 'water_light') ? 1.25 : 1);
       if (day && state.cleanliness >= 60 && state.oxygen >= 40) plant.health = clamp(plant.health + hours * .5);
       if (state.cleanliness < 30) damage(plant, hours * .5, '水质低于 30');
       plant.stage = [0, 2, 6, 12].reduce((stage, threshold, index) => plant.growthHours >= threshold ? index : stage, 0);
+      if (aquaticFlower(plant) === 'bloom' && previousFlower !== 'bloom') changes.push({ kind: 'ecosystem', text: `${label(plant)} 开花了。` });
     }
     for (const fish of [...state.fish]) {
       if (!state.fish.includes(fish)) continue;
@@ -164,8 +175,8 @@ function validFrame(value: unknown, atMs: number): value is AquariumFrame {
   const s = value as AquariumFrame;
   const id = (value: unknown): value is string => typeof value === 'string' && value.length >= 1 && value.length <= 32;
   return validDevelopment(s, 'water') && s.kind === 'water' && ['day', 'night'].includes(s.phase) && percent(s.oxygen) && percent(s.cleanliness) &&
-    Array.isArray(s.fish) && s.fish.length <= capacity(s).organisms && s.fish.every(f => f && id(f.id) && ['guppy', 'goldfish', 'perch'].includes(f.species) && inHabitat(s, f.x, f.y) && percent(f.energy) && percent(f.health) && Number.isFinite(f.ageHours) && f.ageHours >= 0 && (f.lastMeal === undefined || (f.lastMeal && Number.isFinite(f.lastMeal.atMs) && f.lastMeal.atMs <= atMs && ['fish', 'food', 'algae'].includes(f.lastMeal.kind) && id(f.lastMeal.id)))) &&
-    Array.isArray(s.plants) && s.plants.length <= capacity(s).organisms && s.plants.every(p => p && id(p.id) && ['waterweed', 'waterlily', 'algae'].includes(p.species) && inHabitat(s, p.x, p.y) && percent(p.health) && Number.isFinite(p.growthHours) && p.growthHours >= 0 && Number.isInteger(p.stage) && p.stage >= 0 && p.stage <= 3) &&
+    Array.isArray(s.fish) && s.fish.length <= capacity(s).organisms && s.fish.every(f => f && id(f.id) && (TERRARIUM_FISH_SPECIES as readonly string[]).includes(f.species) && inHabitat(s, f.x, f.y) && percent(f.energy) && percent(f.health) && Number.isFinite(f.ageHours) && f.ageHours >= 0 && (f.lastMeal === undefined || (f.lastMeal && Number.isFinite(f.lastMeal.atMs) && f.lastMeal.atMs <= atMs && ['fish', 'food', 'algae'].includes(f.lastMeal.kind) && id(f.lastMeal.id)))) &&
+    Array.isArray(s.plants) && s.plants.length <= capacity(s).organisms && s.plants.every(p => p && id(p.id) && Object.hasOwn(TERRARIUM_AQUATIC_PLANTS, p.species) && inHabitat(s, p.x, p.y) && percent(p.health) && Number.isFinite(p.growthHours) && p.growthHours >= 0 && Number.isInteger(p.stage) && p.stage >= 0 && p.stage <= 3) &&
     Array.isArray(s.food) && s.food.length <= 20 && s.food.every(f => f && id(f.id) && inHabitat(s, f.x, f.y) && Number.isInteger(f.portions) && f.portions >= 1 && f.portions <= 10 && Number.isFinite(f.droppedAtMs) && f.droppedAtMs <= atMs) &&
     new Set([...s.fish, ...s.plants, ...s.food].map(v => v.id)).size === s.fish.length + s.plants.length + s.food.length && new Set(s.plants.map(p => `${p.x},${p.y}`)).size === s.plants.length;
 }
@@ -178,6 +189,6 @@ export function validAquarium(value: unknown): value is AquariumState {
       if (!r || typeof r.id !== 'string' || r.id.length > 160 || !Number.isFinite(r.recordedAtMs) || r.recordedAtMs > s.updatedAtMs || (i > 0 && r.recordedAtMs < s.replays[i - 1].recordedAtMs) || !Array.isArray(r.frames) || r.frames.length !== 3 || !r.frames.every(f => validFrame(f, r.recordedAtMs))) return false;
       const [before, contact, after] = r.frames;
       const hunter = contact.fish.find(f => f.id === r.hunterId), prey = contact.fish.find(f => f.id === r.preyId);
-      return !!hunter && !!prey && hunter.species === 'perch' && prey.species === 'guppy' && hunter.x === prey.x && hunter.y === prey.y && before.fish.some(f => f.id === hunter.id) && before.fish.some(f => f.id === prey.id) && after.fish.some(f => f.id === hunter.id) && !after.fish.some(f => f.id === prey.id);
+      return !!hunter && !!prey && hunter.species === 'perch' && (prey.species === 'guppy' || prey.species === 'neon_tetra') && hunter.x === prey.x && hunter.y === prey.y && before.fish.some(f => f.id === hunter.id) && before.fish.some(f => f.id === prey.id) && after.fish.some(f => f.id === hunter.id) && !after.fish.some(f => f.id === prey.id);
     });
 }

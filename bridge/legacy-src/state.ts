@@ -26,7 +26,7 @@ export interface NestState { id: string; x: number; y: number; depth: number; fo
 export interface SpiderWeb { id: string; spiderId: string; x: number; y: number; createdAtMs: number }
 export interface LandFood { id: string; x: number; y: number; portions: number; droppedAtMs: number; kind?: 'sunflower_seed' }
 export interface ItemState { id: ItemId; x: number; y: number }
-export interface TerrariumState extends DeathHistory, CareAlertState, DevelopmentState { collection?: CollectionItem[]; irrigation?: Array<{ x: number; y: number; targetMoisture: number; intervalMinutes: number; lastWateredAtMs: number }>; version: 3; name?: string; webs?: SpiderWeb[]; eggs?: EggState[]; nests?: NestState[]; food?: LandFood[]; replays?: HuntReplay[]; soil: SoilCell[]; history: HistorySample[]; updatedAtMs: number; nextId: number; plants: PlantState[]; seeds: SeedState[]; bugs: BugState[]; items: ItemState[] }
+export interface TerrariumState extends DeathHistory, CareAlertState, DevelopmentState { fertilizer?: number; collection?: CollectionItem[]; irrigation?: Array<{ x: number; y: number; targetMoisture: number; intervalMinutes: number; lastWateredAtMs: number }>; version: 3; name?: string; webs?: SpiderWeb[]; eggs?: EggState[]; nests?: NestState[]; food?: LandFood[]; replays?: HuntReplay[]; soil: SoilCell[]; history: HistorySample[]; updatedAtMs: number; nextId: number; plants: PlantState[]; seeds: SeedState[]; bugs: BugState[]; items: ItemState[] }
 export interface Change { kind: 'stage' | 'dry' | 'health' | 'phase' | 'sprout' | 'hunt' | 'death' | 'birth' | 'hungry' | 'egg' | 'nest' | 'web' | 'irrigation'; text: string }
 
 export const TERRARIUM_MAX_NAME_LENGTH = 64;
@@ -55,6 +55,30 @@ export const TERRARIUM_WEBS_PER_SPIDER = 3;
 export const TERRARIUM_BREEDING = { maturityHours: 12, pairIntervalHours: 6, queenMaturityHours: 6, queenIntervalHours: 3, eggsPerClutch: 3, incubationHours: 1 } as const;
 const HOUR_MS = 60 * 60_000;
 export const TERRARIUM_MAX_CATCHUP_MS = 30 * 24 * HOUR_MS;
+
+/** Applies growth milestones without advancing the habitat clock. */
+export function settlePlantGrowth(state: TerrariumState, plant: PlantState, previousFlower: ReturnType<typeof flowerStage>, atMs: number, canSetSeed = true, settleAllSeedRounds = false): Change[] {
+  const changes: Change[] = [];
+  const stage = STAGES.reduce((n, threshold, index) => plant.growthHours >= threshold ? index : n, 0);
+  if (stage !== plant.stage) {
+    plant.stage = stage;
+    changes.push({ kind: 'stage', text: `${label(plant)} 长到了第 ${stage} 阶段。` });
+  }
+  if (canSetSeed && plant.health >= TERRARIUM_PLANT_RECOVERED_HEALTH && plant.species === 'sunflower' && plant.growthHours >= TERRARIUM_SUNFLOWER.seedHours) {
+    const rounds = sunflowerSeedRounds(plant.growthHours);
+    if (rounds > (plant.seedRounds ?? 0)) {
+      const clutches = settleAllSeedRounds ? rounds - (plant.seedRounds ?? 0) : 1;
+      plant.seedRounds = rounds;
+      for (let i = 0; i < clutches && (state.food?.length ?? 0) < 20; i++) {
+        const food: LandFood = { id: `food-${state.nextId++}`, x: plant.x, y: plant.y, portions: TERRARIUM_SUNFLOWER.seedPortions, droppedAtMs: atMs, kind: 'sunflower_seed' };
+        (state.food ??= []).push(food);
+        changes.push({ kind: 'stage', text: `${label(plant)} 结籽，落下 ${TERRARIUM_SUNFLOWER.seedPortions} 份葵花籽 ${food.id}，蚂蚁可以采集；48 小时后腐解。` });
+      }
+    }
+  }
+  if (flowerStage(plant) === 'bloom' && previousFlower !== 'bloom') changes.push({ kind: 'stage', text: `${label(plant)} 开花了。` });
+  return changes;
+}
 
 export function newState(nowMs: number): TerrariumState {
   const state: TerrariumState = { version: 3, soil: Array.from({ length: 25 }, (_, i) => ({ x: i % 5, y: Math.floor(i / 5), moisture: 50 })), history: [], updatedAtMs: nowMs, nextId: 1, plants: [
@@ -408,28 +432,12 @@ export function advance(state: TerrariumState, nowMs: number, timezone: string):
         if (plant.leafDamage !== undefined && plant.health >= TERRARIUM_PLANT_RECOVERED_HEALTH) plant.leafDamage = Math.max(0, plant.leafDamage - hours * TERRARIUM_LEAF_DAMAGE.recoveryPerGrowthHour);
       }
       if (!hydrated) damage(plant, hours * .5, plant.moisture < needs.minMoisture ? '水分过低' : '水分过高');
-      const stage = STAGES.reduce((n, threshold, index) => plant.growthHours >= threshold ? index : n, 0);
-      if (stage !== plant.stage) {
-        plant.stage = stage;
-        changes.push({ kind: 'stage', text: `${label(plant)} 长到了第 ${stage} 阶段。` });
-      }
       if (!plant.dry && plant.moisture < needs.minMoisture) {
         plant.dry = true;
         changes.push({ kind: 'dry', text: `${label(plant)} 的土壤变干了（水分 ${plant.moisture.toFixed(1)}，生长下限 ${needs.minMoisture}）。${plantCareAdvice(plant)}` });
       }
       plant.dry = plant.moisture < needs.minMoisture;
-      if (before === 'day' && hydrated && light >= needs.minLight && light <= needs.maxLight && plant.health >= TERRARIUM_PLANT_RECOVERED_HEALTH && plant.species === 'sunflower' && plant.growthHours >= TERRARIUM_SUNFLOWER.seedHours) {
-        const rounds = sunflowerSeedRounds(plant.growthHours);
-        if (rounds > (plant.seedRounds ?? 0)) {
-          plant.seedRounds = rounds;
-          if ((state.food?.length ?? 0) < 20) {
-            const food: LandFood = { id: `food-${state.nextId++}`, x: plant.x, y: plant.y, portions: TERRARIUM_SUNFLOWER.seedPortions, droppedAtMs: end, kind: 'sunflower_seed' };
-            (state.food ??= []).push(food);
-            changes.push({ kind: 'stage', text: `${label(plant)} 结籽，落下 ${TERRARIUM_SUNFLOWER.seedPortions} 份葵花籽 ${food.id}，蚂蚁可以采集；48 小时后腐解。` });
-          }
-        }
-      }
-      if (flowerStage(plant) === 'bloom' && previousFlower !== 'bloom') changes.push({ kind: 'stage', text: `${label(plant)} 开花了。` });
+      changes.push(...settlePlantGrowth(state, plant, previousFlower, end, before === 'day' && hydrated && light >= needs.minLight && light <= needs.maxLight));
     }
     const hourlyStep = Math.floor(start / HOUR_MS) !== Math.floor(end / HOUR_MS);
     const currentBugs = [...state.bugs];
@@ -638,7 +646,7 @@ function validReplays(state: Partial<TerrariumState>): boolean {
 export function validState(value: unknown): value is TerrariumState {
   if (!value || typeof value !== 'object') return false;
   const state = value as Partial<TerrariumState>;
-  if (!validDevelopment(state, 'land') || !validCareAlerts(state.careAlerts) || !validDeaths(state.deaths, state.updatedAtMs!, capacity(state).size) || !validCollection(state.collection, 'land', capacity(state).collection) || (state.irrigation !== undefined && (!Array.isArray(state.irrigation) || state.irrigation.length > capacity(state).size ** 2 || new Set(state.irrigation.map(c => `${c?.x},${c?.y}`)).size !== state.irrigation.length || !state.irrigation.every(c => c && inHabitat(state, c.x, c.y) && Number.isFinite(c.targetMoisture) && c.targetMoisture >= 0 && c.targetMoisture <= 100 && Number.isFinite(c.intervalMinutes) && c.intervalMinutes >= 1 && c.intervalMinutes <= 1440 && Number.isFinite(c.lastWateredAtMs))))) return false;
+  if ((state.fertilizer !== undefined && (!Number.isSafeInteger(state.fertilizer) || state.fertilizer < 0)) || !validDevelopment(state, 'land') || !validCareAlerts(state.careAlerts) || !validDeaths(state.deaths, state.updatedAtMs!, capacity(state).size) || !validCollection(state.collection, 'land', capacity(state).collection) || (state.irrigation !== undefined && (!Array.isArray(state.irrigation) || state.irrigation.length > capacity(state).size ** 2 || new Set(state.irrigation.map(c => `${c?.x},${c?.y}`)).size !== state.irrigation.length || !state.irrigation.every(c => c && inHabitat(state, c.x, c.y) && Number.isFinite(c.targetMoisture) && c.targetMoisture >= 0 && c.targetMoisture <= 100 && Number.isFinite(c.intervalMinutes) && c.intervalMinutes >= 1 && c.intervalMinutes <= 1440 && Number.isFinite(c.lastWateredAtMs))))) return false;
   return state.version === 3 && (state.name === undefined || validName(state.name)) && validHabitat(state) && validReplays(state) && Number.isFinite(state.updatedAtMs) && Number.isSafeInteger(state.nextId) && state.nextId! >= 1 &&
     Array.isArray(state.plants) && state.plants.length <= capacity(state).organisms &&
     state.plants.every(p => p && typeof p.id === 'string' && p.id.length <= 32 && Object.hasOwn(TERRARIUM_PLANT_REQUIREMENTS, p.species) && inHabitat(state, p.x, p.y) && Number.isFinite(p.moisture) && p.moisture >= 0 && p.moisture <= 100 && Number.isFinite(p.growthHours) && p.growthHours >= 0 && Number.isInteger(p.stage) && p.stage >= 0 && p.stage <= 3 && typeof p.dry === 'boolean' && Number.isFinite(p.health) && p.health >= 0 && p.health <= 100 && (p.healthWarning === undefined || typeof p.healthWarning === 'boolean') && (p.leafDamage === undefined || (Number.isFinite(p.leafDamage) && p.leafDamage >= 0 && p.leafDamage <= 100)) && (p.seedRounds === undefined || (p.species === 'sunflower' && Number.isSafeInteger(p.seedRounds) && p.seedRounds >= 0 && p.seedRounds <= sunflowerSeedRounds(p.growthHours)))) &&
