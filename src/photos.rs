@@ -4,14 +4,19 @@ use crate::{
     protocol::{MAX_BYTES, state_hash, valid_hash, valid_id},
 };
 use axum::{
-    Json,
-    body::to_bytes,
-    extract::{Request, State},
+    Extension, Json,
+    body::{Body, to_bytes},
+    extract::{Path, Request, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
 use serde_json::{Value, json};
-use std::{path::PathBuf, process::Stdio, sync::LazyLock, time::Duration};
+use std::{
+    path::PathBuf,
+    process::Stdio,
+    sync::{Arc, LazyLock},
+    time::Duration,
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     process::Command,
@@ -28,7 +33,11 @@ static RENDERER: LazyLock<Semaphore> = LazyLock::new(|| Semaphore::new(1));
 fn error(status: StatusCode, message: &str) -> Response {
     (status, Json(json!({"error":message}))).into_response()
 }
-pub async fn take(State(app): State<App>, request: Request) -> Response {
+pub async fn take(
+    State(app): State<App>,
+    Extension(cache): Extension<Arc<crate::photo_cache::PhotoCache>>,
+    request: Request,
+) -> Response {
     let token = request
         .headers()
         .get("authorization")
@@ -70,7 +79,7 @@ pub async fn take(State(app): State<App>, request: Request) -> Response {
     };
     let expected_hash = input["stateHash"].as_str().unwrap().to_owned();
     let expected_phase = input["phase"].clone();
-    let store = app.store;
+    let store = app.store.clone();
     let entry = match tokio::task::spawn_blocking(move || -> anyhow::Result<Snapshot> {
         if !store.authenticated(&id, &token)? {
             return Ok(Snapshot::Denied);
@@ -106,6 +115,7 @@ pub async fn take(State(app): State<App>, request: Request) -> Response {
         }
     };
     let captured_at = crate::policy::iso(crate::ingestion::now_ms());
+    let metadata = json!({"boxId":entry["id"],"habitat":entry["kind"],"capturedAt":captured_at,"stateHash":input["stateHash"],"caption":caption});
     let payload = json!({"entry":entry,"caption":caption,"capturedAt":captured_at,"stateHash":input["stateHash"]});
     let worker = match (app.release_root, app.release_id) {
         (Some(root), Some(id)) if crate::assets::valid_release_id(&id) => root
@@ -123,22 +133,33 @@ pub async fn take(State(app): State<App>, request: Request) -> Response {
         }
     };
     match render(worker, payload).await {
-        Ok(bytes) => (
-            [
-                ("content-type", "image/png"),
-                (
-                    "content-disposition",
-                    "inline; filename=terrarium-photo.png",
-                ),
-                (
-                    "x-terrarium-state-hash",
-                    input["stateHash"].as_str().unwrap(),
-                ),
-                ("x-terrarium-captured-at", captured_at.as_str()),
-            ],
-            bytes,
-        )
-            .into_response(),
+        Ok(bytes) => match publish(cache, app.store, bytes, metadata).await {
+            Ok((bytes, url, expires_at)) => (
+                [
+                    ("content-type", "image/png"),
+                    (
+                        "content-disposition",
+                        "inline; filename=terrarium-photo.png",
+                    ),
+                    (
+                        "x-terrarium-state-hash",
+                        input["stateHash"].as_str().unwrap(),
+                    ),
+                    ("x-terrarium-captured-at", captured_at.as_str()),
+                    ("x-terrarium-photo-url", url.as_str()),
+                    ("x-terrarium-photo-expires-at", expires_at.as_str()),
+                ],
+                bytes,
+            )
+                .into_response(),
+            Err(error) => {
+                eprintln!("Photo link publication failed: {error:#}");
+                self::error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "Temporary photo storage unavailable; retry later",
+                )
+            }
+        },
         Err(error) => {
             eprintln!("Photo render failed: {error:#}");
             self::error(
@@ -195,6 +216,134 @@ async fn render(worker: PathBuf, input: Value) -> anyhow::Result<Vec<u8>> {
         Err(_) => {
             let _ = child.kill().await;
             anyhow::bail!("Photo rendering timed out")
+        }
+    }
+}
+
+fn public_origin(value: &str) -> anyhow::Result<String> {
+    let value = value.trim_end_matches('/');
+    let uri: axum::http::Uri = value.parse()?;
+    anyhow::ensure!(
+        uri.scheme_str() == Some("https")
+            && uri.authority().is_some_and(|a| !a.as_str().contains('@'))
+            && uri.path_and_query().is_none_or(|p| p.as_str() == "/")
+            && value.len() <= 256,
+        "Public photo origin must be an HTTPS origin"
+    );
+    Ok(value.to_owned())
+}
+async fn publish(
+    cache: Arc<crate::photo_cache::PhotoCache>,
+    store: crate::store::Store,
+    bytes: Vec<u8>,
+    mut data: Value,
+) -> anyhow::Result<(Vec<u8>, String, String)> {
+    let origin = public_origin(
+        &std::env::var("CORTICO_TERRARIUM_PUBLIC_URL")
+            .unwrap_or_else(|_| "https://cortico-box.zhiyuhub.top".into()),
+    )?;
+    tokio::task::spawn_blocking(move || {
+        let now = crate::ingestion::now_ms();
+        let (bytes, link) = cache.save(bytes, now)?;
+        let url = format!("{origin}/api/photos/{}", link.key);
+        let expiry = crate::policy::iso(link.expires_at_ms);
+        data["url"] = json!(url);
+        data["expiresAt"] = json!(expiry);
+        if let Err(error) = store.photo_receipt(data["boxId"].as_str().unwrap(), &data, now) {
+            cache.remove(&link.key)?;
+            return Err(error);
+        }
+        Ok((bytes, url, expiry))
+    })
+    .await?
+}
+
+pub fn start_cleanup(cache: &Arc<crate::photo_cache::PhotoCache>, store: crate::store::Store) {
+    let weak = Arc::downgrade(cache);
+    tokio::spawn(async move {
+        while let Some(cache) = weak.upgrade() {
+            let store = store.clone();
+            let result = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+                let now = crate::ingestion::now_ms();
+                cache.cleanup(now)?;
+                store.cleanup_photo_receipts(now)?;
+                Ok(())
+            })
+            .await;
+            if !matches!(result, Ok(Ok(()))) {
+                eprintln!("Temporary photo cleanup failed");
+            }
+            tokio::time::sleep(Duration::from_secs(crate::photo_cache::CLEANUP_SECONDS)).await;
+        }
+    });
+}
+static DOWNLOADS: LazyLock<Arc<Semaphore>> = LazyLock::new(|| Arc::new(Semaphore::new(16)));
+pub async fn download(
+    Extension(cache): Extension<Arc<crate::photo_cache::PhotoCache>>,
+    Path(key): Path<String>,
+) -> Response {
+    let permit = match DOWNLOADS.clone().try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            return error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "Too many photo downloads; retry shortly",
+            );
+        }
+    };
+    let result =
+        tokio::task::spawn_blocking(move || cache.open(&key, crate::ingestion::now_ms())).await;
+    let (file, size, expiry) = match result {
+        Ok(Ok(Some(value))) => value,
+        Ok(Ok(None)) => return error(StatusCode::NOT_FOUND, "Photo not found or expired"),
+        _ => return error(StatusCode::SERVICE_UNAVAILABLE, "Photo read unavailable"),
+    };
+    let stream = futures_util::stream::try_unfold(
+        (tokio::fs::File::from_std(file), permit),
+        |(mut file, permit)| async move {
+            let mut bytes = vec![0; 64 * 1024];
+            let read = file.read(&mut bytes).await?;
+            if read == 0 {
+                return Ok::<_, std::io::Error>(None);
+            }
+            bytes.truncate(read);
+            Ok(Some((bytes, (file, permit))))
+        },
+    );
+    (
+        [
+            ("content-type", "image/png".to_owned()),
+            ("content-length", size.to_string()),
+            ("cache-control", "no-store".to_owned()),
+            (
+                "content-disposition",
+                "inline; filename=terrarium-photo.png".to_owned(),
+            ),
+            ("x-robots-tag", "noindex, nofollow".to_owned()),
+            ("x-terrarium-photo-expires-at", crate::policy::iso(expiry)),
+        ],
+        Body::from_stream(stream),
+    )
+        .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn requires_an_https_origin_without_credentials_paths_or_query() {
+        assert_eq!(
+            public_origin("https://photos.example.test/").unwrap(),
+            "https://photos.example.test"
+        );
+        for input in [
+            "http://photos.example.test",
+            "https://user:secret@example.test",
+            "https://example.test/path",
+            "https://example.test?key=value",
+            "/relative",
+        ] {
+            assert!(public_origin(input).is_err());
         }
     }
 }

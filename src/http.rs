@@ -22,6 +22,8 @@ pub struct App {
     pub ingestion: Option<Ingestion>,
 }
 pub fn router(app: App) -> Router {
+    let photos = crate::photo_cache::PhotoCache::new(app.store.photo_dir());
+    crate::photos::start_cleanup(&photos, app.store.clone());
     Router::new()
         .route("/", get(crate::presentation::index))
         .route("/api/presentation", get(crate::presentation::status))
@@ -44,6 +46,7 @@ pub fn router(app: App) -> Router {
         .route("/api/forum/status", get(crate::forum::status))
         .route("/api/forum/{*path}", any(crate::forum::handle))
         .route("/api/photos", post(crate::photos::take))
+        .route("/api/photos/{key}", get(crate::photos::download))
         .route("/health", get(health))
         .route("/api/leaderboard", get(leaderboard))
         .route("/api/boxes/{id}", get(box_detail))
@@ -73,6 +76,7 @@ pub fn router(app: App) -> Router {
             },
         ))
         .layer(DefaultBodyLimit::disable())
+        .layer(axum::Extension(photos))
         .with_state(app)
 }
 async fn historical_asset(State(app): State<App>, request: Request) -> Response {

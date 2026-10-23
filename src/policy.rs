@@ -179,6 +179,7 @@ pub(crate) fn validate_document(name: &str, value: &Value) -> Result<()> {
                 }
                 crate::forum_bridge::validate(client)?;
                 crate::forum_digest::validate(client)?;
+                crate::photo_notices::validate(client)?;
             }
         }
         _ => {}
@@ -407,7 +408,11 @@ impl Store {
             visible.push(notice);
         }
         if let Some(id) = id {
-            visible.extend(crate::forum_bridge::notices(&conn, id, after, now)?);
+            let clients = document(&conn, "protocol-notices.json")?.unwrap_or_else(|| json!({}));
+            visible.extend(crate::forum_bridge::notices(
+                &conn, &clients, id, after, now,
+            )?);
+            visible.extend(crate::photo_notices::notices(&clients, id, after, now));
         }
         visible.sort_by_key(|n| n["id"].as_u64().unwrap_or(0));
         let cursor = data["nextId"].as_u64().unwrap() - 1;

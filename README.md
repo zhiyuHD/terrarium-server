@@ -1,4 +1,4 @@
-<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, web/forum.html, web/admin/index.html, web/admin/client.js, src/forum.rs, src/forum_recommendation.rs, src/forum_bridge.rs, src/forum_digest.rs, src/presentation.rs, src/story.rs, src/story_text.rs, src/story_seedbed.rs, reading/worker.py, src/photos.rs, photo/render.mjs, photo/build.mjs -->
+<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, web/forum.html, web/admin/index.html, web/admin/client.js, src/forum.rs, src/forum_recommendation.rs, src/forum_bridge.rs, src/forum_digest.rs, src/presentation.rs, src/story.rs, src/story_text.rs, src/story_seedbed.rs, reading/worker.py, src/photos.rs, src/photo_cache.rs, src/photo_notices.rs, photo/render.mjs, photo/build.mjs -->
 # terrarium-server
 
 生态箱独立服务端，生产 HTTP/WS 与存储使用 Rust + SQLite。兼容现有 World 的 HTTP/WS 协议与 TS 存档，可通过 Native 原子发布控制器运行。公共接口仅监听回环地址，管理台使用独立私网端口。
@@ -190,7 +190,7 @@ node scripts/check-snapshot.mjs /path/to/legacy/server.mjs /path/to/isolated-sna
 
 ## 拍照服务
 
-World 0.8.9「照记影踪」通过 `POST /api/photos` 请求当前箱子的 Material You 海报。Bearer token 使用已有箱子凭据，请求体 `{id,stateHash,phase,caption,clientVersion}`；状态 hash 必须与已提交的完整存档一致。配文最多 120 字。只返回 PNG 和状态 hash、拍摄时间响应头，不保存服务端相册，也不更改箱子状态或积分。Core 保存图片附件，QQ World 使用其图片句柄发送。
+World 0.8.9「照记影踪」通过 `POST /api/photos` 请求当前箱子的 Material You 海报。Bearer token 使用已有箱子凭据，请求体 `{id,stateHash,phase,caption,clientVersion}`；状态 hash 必须与已提交的完整存档一致。配文最多 120 字。保留 PNG、状态 hash、拍摄时间响应头，额外返回 `X-Terrarium-Photo-Url` 与 `X-Terrarium-Photo-Expires-At`。URL 有效 24 小时，服务端临时落盘，下载按 64 KiB 分块传输；到期立即拒绝访问，后台每 60 秒删除过期文件及协议回执。Core 继续保存附件，旧客户端通过私有协议回执收到备用 HTTPS 地址，无需升级 World。不会更改箱子状态或积分，回执不进入管理公告列表。详见 [临时照片链接](docs/photo-links.md)。
 
 在打包前执行 `npm --prefix photo ci` 安装锁定的构建依赖。`scripts/pack-release.mjs` 自动构建绘图 worker、复制对应 Linux 架构的 Canvas 原生模块、MiSans 字体与许可证到 `console/assets/`，沿用原子发布校验和回滚流程，data epoch 仍为 2。开发和测试先执行 `npm --prefix photo run build`。生产只加载当前发布内的绘图资源。安装包不包含 Chromium；每次渲染启动一个 Node 子进程，20 秒超时退出、PNG 上限 8 MiB、同一时间只允许一次渲染，忙时返回 429。Node 的 V8 堆上限为 96 MiB，原生图形内存不计入此上限。取消请求会结束该子进程。
 

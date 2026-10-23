@@ -29,3 +29,6 @@ mod story_seedbed;
 mod story_text;
 
 pub mod photos;
+
+pub mod photo_cache;
+mod photo_notices;

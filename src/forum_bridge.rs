@@ -418,6 +418,7 @@ pub fn prepare_poll(store: &Store, id: &str, version: &Value, after: u64, now: i
         prune(&mut all, now);
         let client = client_mut(&mut all, id);
         pending_mut(client).retain(|n| n["id"].as_u64().unwrap() > after);
+        crate::photo_notices::prune(client, now, Some(after));
         let main = version.as_str().unwrap_or("").split('-').next().unwrap();
         let old = !valid_version(version) || !meets_minimum(&json!(main), &json!("0.8.7"));
         if old
@@ -453,8 +454,13 @@ pub fn prepare_poll(store: &Store, id: &str, version: &Value, after: u64, now: i
         Ok(())
     })
 }
-pub fn notices(conn: &Connection, id: &str, after: u64, now: i64) -> Result<Vec<Value>> {
-    let all = clients(conn)?;
+pub fn notices(
+    conn: &Connection,
+    all: &Value,
+    id: &str,
+    after: u64,
+    now: i64,
+) -> Result<Vec<Value>> {
     let mut notices: Vec<Value> = all[id]["forumReplies"]
         .as_array()
         .into_iter()
@@ -464,6 +470,6 @@ pub fn notices(conn: &Connection, id: &str, after: u64, now: i64) -> Result<Vec<
         })
         .cloned()
         .collect();
-    notices.extend(crate::forum_digest::notices(conn, &all, after, now)?);
+    notices.extend(crate::forum_digest::notices(conn, all, after, now)?);
     Ok(notices)
 }

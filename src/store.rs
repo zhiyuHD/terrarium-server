@@ -157,6 +157,9 @@ impl Store {
             .lock()
             .map_err(|_| anyhow::anyhow!("Database writer lock poisoned"))
     }
+    pub fn photo_dir(&self) -> PathBuf {
+        self.path.with_extension("photos")
+    }
     pub fn forum_path(&self) -> PathBuf {
         self.path.with_extension("forum.sqlite")
     }
