@@ -18,16 +18,16 @@ function nearFacility(state, kind, x, y) {
 
 // src/merchant.ts
 var TERRARIUM_POTS = {
-  clay: { name: "\u7D20\u9676\u76C6", price: 24, effect: "\u6696\u9676\u8272\u88C5\u9970\uFF0C\u65E0\u989D\u5916\u6548\u679C", growth: 1, evaporation: 1, light: 0, recovery: 0 },
-  porcelain: { name: "\u9752\u74F7\u76C6", price: 40, effect: "\u9752\u74F7\u4E0E\u7EC6\u53F6\u7EB9\u88C5\u9970\uFF0C\u65E0\u989D\u5916\u6548\u679C", growth: 1, evaporation: 1, light: 0, recovery: 0 },
-  spring: { name: "\u6625\u9192\u76C6", price: 100, effect: "\u81EA\u7136\u751F\u957F \xD71.5\uFF0C\u84B8\u53D1 \xD71.3", growth: 1.5, evaporation: 1.3, light: 0, recovery: 0 },
-  slow: { name: "\u7F13\u65F6\u76C6", price: 60, effect: "\u81EA\u7136\u751F\u957F \xD70.5\uFF0C\u84B8\u53D1 \xD70.8", growth: 0.5, evaporation: 0.8, light: 0, recovery: 0 },
-  still: { name: "\u7559\u666F\u76C6", price: 120, effect: "\u505C\u6B62\u840C\u53D1\u548C\u751F\u957F\uFF0C\u7981\u6B62\u65BD\u80A5\uFF1B\u6C34\u5206\u3001\u5065\u5EB7\u548C\u91C7\u98DF\u4ECD\u6B63\u5E38\u7ED3\u7B97", growth: 0, evaporation: 1, light: 0, recovery: 0 },
-  reservoir: { name: "\u84C4\u9732\u76C6", price: 80, effect: "\u84B8\u53D1 \xD70.45\uFF1B\u4E0D\u81EA\u52A8\u6D47\u6C34", growth: 1, evaporation: 0.45, light: 0, recovery: 0 },
-  drainage: { name: "\u900F\u96E8\u76C6", price: 60, effect: "\u6BCF\u5C0F\u65F6\u989D\u5916\u6392\u51FA 2 \u6C34\u5206\uFF0C\u6700\u4F4E\u6392\u5230 60\uFF1B\u4ECD\u4F1A\u81EA\u7136\u84B8\u53D1", growth: 1, evaporation: 1, light: 0, recovery: 0 },
-  shade: { name: "\u82D4\u836B\u76C6", price: 80, effect: "\u672C\u683C\u767D\u5929\u5149\u7167 \xD70.55\uFF0C\u84B8\u53D1 \xD70.8", growth: 1, evaporation: 0.8, light: -0.45, recovery: 0 },
-  sun: { name: "\u6620\u65E5\u76C6", price: 120, effect: "\u672C\u683C\u767D\u5929\u5149\u7167 +0.25\uFF0C\u4E0A\u9650 1\uFF1B\u4E0D\u6539\u53D8\u663C\u591C", growth: 1, evaporation: 1, light: 0.25, recovery: 0 },
-  healing: { name: "\u517B\u53F6\u76C6", price: 160, effect: "\u9002\u5B9C\u767D\u5929\u6BCF\u5C0F\u65F6\u6062\u590D 1 \u5065\u5EB7\u53CA 2 \u53F6\u635F\uFF1B\u81EA\u7136\u751F\u957F \xD70.8", growth: 0.8, evaporation: 1, light: 0, recovery: 1 }
+  clay: { name: "\u7D20\u9676\u76C6", price: 24, effect: "\u6696\u9676\u8272\u88C5\u9970\uFF0C\u65E0\u989D\u5916\u6548\u679C", growth: 1, evaporation: 1, light: 0, recovery: 0, drain: 0 },
+  porcelain: { name: "\u9752\u74F7\u76C6", price: 40, effect: "\u9752\u74F7\u4E0E\u7EC6\u53F6\u7EB9\u88C5\u9970\uFF0C\u65E0\u989D\u5916\u6548\u679C", growth: 1, evaporation: 1, light: 0, recovery: 0, drain: 0 },
+  spring: { name: "\u6625\u9192\u76C6", price: 100, effect: "\u81EA\u7136\u751F\u957F \xD71.5\uFF0C\u84B8\u53D1 \xD71.3", growth: 1.5, evaporation: 1.3, light: 0, recovery: 0, drain: 0 },
+  slow: { name: "\u7F13\u65F6\u76C6", price: 60, effect: "\u81EA\u7136\u751F\u957F \xD70.5\uFF0C\u84B8\u53D1 \xD70.8", growth: 0.5, evaporation: 0.8, light: 0, recovery: 0, drain: 0 },
+  still: { name: "\u7559\u666F\u76C6", price: 120, effect: "\u505C\u6B62\u840C\u53D1\u548C\u751F\u957F\uFF0C\u7981\u6B62\u65BD\u80A5\uFF1B\u6C34\u5206\u3001\u5065\u5EB7\u548C\u91C7\u98DF\u4ECD\u6B63\u5E38\u7ED3\u7B97", growth: 0, evaporation: 1, light: 0, recovery: 0, drain: 0 },
+  reservoir: { name: "\u84C4\u9732\u76C6", price: 80, effect: "\u84B8\u53D1 \xD70.45\uFF1B\u4E0D\u81EA\u52A8\u6D47\u6C34", growth: 1, evaporation: 0.45, light: 0, recovery: 0, drain: 0 },
+  drainage: { name: "\u900F\u96E8\u76C6", price: 60, effect: "\u6BCF\u5C0F\u65F6\u989D\u5916\u6392\u51FA 2 \u6C34\u5206\uFF0C\u6700\u4F4E\u6392\u5230 60\uFF1B\u4ECD\u4F1A\u81EA\u7136\u84B8\u53D1", growth: 1, evaporation: 1, light: 0, recovery: 0, drain: 2 },
+  shade: { name: "\u82D4\u836B\u76C6", price: 80, effect: "\u672C\u683C\u767D\u5929\u5149\u7167 \xD70.55\uFF0C\u84B8\u53D1 \xD70.8", growth: 1, evaporation: 0.8, light: -0.45, recovery: 0, drain: 0 },
+  sun: { name: "\u6620\u65E5\u76C6", price: 120, effect: "\u672C\u683C\u767D\u5929\u5149\u7167 +0.25\uFF0C\u4E0A\u9650 1\uFF1B\u4E0D\u6539\u53D8\u663C\u591C", growth: 1, evaporation: 1, light: 0.25, recovery: 0, drain: 0 },
+  healing: { name: "\u517B\u53F6\u76C6", price: 160, effect: "\u9002\u5B9C\u767D\u5929\u6BCF\u5C0F\u65F6\u6062\u590D 1 \u5065\u5EB7\u53CA 2 \u53F6\u635F\uFF1B\u81EA\u7136\u751F\u957F \xD70.8", growth: 0.8, evaporation: 1, light: 0, recovery: 1, drain: 0 }
 };
 function potAt(state, x, y) {
   const pot = state.economy?.pots.find((p) => p.x === x && p.y === y);
