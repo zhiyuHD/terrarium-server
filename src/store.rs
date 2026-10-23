@@ -286,6 +286,48 @@ impl Store {
         })
         .collect()
     }
+    /// Wallet ranking is separate from ecosystem score and uses the last accepted snapshot.
+    pub fn coins(&self, limit: usize, own: Option<&str>) -> Result<Value> {
+        let conn = self.reader()?;
+        let mut stmt = conn.prepare("WITH wallets AS (
+            SELECT id,id_sort,reported_at,
+                json_extract(entry,'$.state.name') name,
+                json_extract(entry,'$.state.economy.earned') earned,
+                json_extract(entry,'$.state.economy.earned')-json_extract(entry,'$.state.economy.spent') coins
+            FROM boxes WHERE kind='land'
+                AND json_type(entry,'$.state.economy.earned')='integer'
+                AND json_type(entry,'$.state.economy.spent')='integer'
+                AND json_extract(entry,'$.state.economy.earned') BETWEEN 1 AND 1000000000
+                AND json_extract(entry,'$.state.economy.spent') BETWEEN 0 AND json_extract(entry,'$.state.economy.earned')
+        ), ranks AS (SELECT *,row_number() OVER(ORDER BY coins DESC,id_sort) position,
+            rank() OVER(ORDER BY coins DESC) competitive,count(*) OVER() total FROM wallets)
+        SELECT id,name,reported_at,earned,coins,position,competitive,total FROM ranks
+        WHERE position<=?1 OR id=?2 ORDER BY position")?;
+        let rows = stmt.query_map(params![limit as i64, own], |r| {
+            Ok((serde_json::json!({"id":r.get::<_,String>(0)?,"name":r.get::<_,Option<String>>(1)?,
+                "reportedAt":r.get::<_,String>(2)?,"earned":r.get::<_,i64>(3)?,"coins":r.get::<_,i64>(4)?,
+                "rank":r.get::<_,i64>(5)?,"competitiveRank":r.get::<_,i64>(6)?}),r.get::<_,i64>(7)?))
+        })?;
+        let mut entries = Vec::new();
+        let mut mine = Value::Null;
+        let mut total = 0;
+        for row in rows {
+            let (mut entry, count) = row?;
+            total = count;
+            if entry["name"].is_null() {
+                entry.as_object_mut().unwrap().remove("name");
+            }
+            if own.is_some_and(|id| entry["id"] == id) {
+                mine = entry.clone();
+            }
+            if entry["rank"].as_u64().unwrap() <= limit as u64 {
+                entries.push(entry);
+            }
+        }
+        Ok(
+            serde_json::json!({"habitat":"land","metric":"coins","total":total,"entries":entries,"own":mine}),
+        )
+    }
     pub fn summary(&self, kind: &str, limit: usize, own: Option<&str>) -> Result<Value> {
         let mut conn = self.reader()?;
         let tx = conn.transaction()?;
@@ -528,6 +570,7 @@ pub(crate) fn scene_entry(entry: &Value) -> Value {
             "facilities",
             "plants",
             "soil",
+            "economy",
             "seeds",
             "bugs",
             "items",

@@ -133,6 +133,21 @@ async fn leaderboard(
         return error(StatusCode::BAD_REQUEST, "Invalid box kind");
     }
     let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Value> {
+        if query.get("view").is_some_and(|v| v == "coins") {
+            anyhow::ensure!(
+                kind.as_deref() == Some("land"),
+                "Coin ranking requires land"
+            );
+            let limit = query
+                .get("limit")
+                .map(|v| v.parse::<usize>())
+                .transpose()?
+                .unwrap_or(20);
+            anyhow::ensure!((1..=100).contains(&limit), "Invalid coin ranking limit");
+            return app
+                .store
+                .coins(limit, query.get("ownId").map(String::as_str));
+        }
         if query.get("view").is_some_and(|v| v == "gallery") {
             let kind = kind
                 .as_deref()

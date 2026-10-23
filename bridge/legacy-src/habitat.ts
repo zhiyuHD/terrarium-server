@@ -1,3 +1,4 @@
+import { potAt, type Economy } from './merchant.ts';
 import { capacity, nearFacility, type DevelopmentState } from './progression.ts';
 export type PlantSpecies = 'fern' | 'clover' | 'moss' | 'basil' | 'bean' | 'sunflower' | 'mint' | 'daisy' | 'lavender';
 export interface PlantRequirements { minMoisture: number; maxMoisture: number; minLight: number; maxLight: number }
@@ -5,7 +6,7 @@ export interface SoilCell { x: number; y: number; moisture: number; allowAntFora
 export const TERRARIUM_LEAF_DAMAGE = { perHarvestHealth: 5, recoveryPerGrowthHour: 2 } as const;
 export const TERRARIUM_PLANT_LOW_HEALTH = 20;
 export const TERRARIUM_PLANT_RECOVERED_HEALTH = 35;
-export interface Habitat extends DevelopmentState { items: ReadonlyArray<{ id: string; x: number; y: number }> }
+export interface Habitat extends DevelopmentState { economy?: Economy; items: ReadonlyArray<{ id: string; x: number; y: number }> }
 
 /** Simulation conditions, expressed as soil moisture (0–100) and daylight (0–1). */
 export const TERRARIUM_PLANT_REQUIREMENTS: Record<PlantSpecies, PlantRequirements> = {
@@ -40,6 +41,8 @@ export function daylight(habitat: Habitat, x: number, y: number): number {
   let light = (.6 + x * .4 / (capacity(habitat).size - 1)) * (shaded ? .35 : 1);
   if (nearFacility(habitat, 'shade', x, y)) light *= .6;
   if (nearFacility(habitat, 'grow_light', x, y)) light = Math.max(.75, light);
+  const pot = potAt(habitat, x, y);
+  if (pot) light = pot.light < 0 ? light * (1 + pot.light) : Math.min(1, light + pot.light);
   return light;
 }
 

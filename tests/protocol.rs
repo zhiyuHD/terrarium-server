@@ -144,3 +144,25 @@ fn client_system_metadata_has_only_bounded_name_and_version() {
         assert!(!valid_client_system(&value));
     }
 }
+
+#[tokio::test]
+async fn wallet_validation_preserves_pots_and_rejects_inconsistent_money_without_changing_hashes() {
+    let fixtures: Value = serde_json::from_str(include_str!("fixtures/reports.json")).unwrap();
+    let validator = LegacyValidator::default();
+    let mut land = fixtures["land"].clone();
+    land["economy"] =
+        json!({"earned":200,"spent":24,"inventory":{},"pots":[{"kind":"clay","x":1,"y":2}]});
+    let hash = state_hash(&land);
+    assert_eq!(validator.validate(&land).await.unwrap(), land);
+    assert_eq!(state_hash(&validator.validate(&land).await.unwrap()), hash);
+    for invalid_economy in [
+        json!({"earned":-1,"spent":0,"inventory":{},"pots":[]}),
+        json!({"earned":200,"spent":0,"inventory":{},"pots":[{"kind":"spring","x":1,"y":2}]}),
+        json!({"earned":200,"spent":24,"inventory":{},"pots":[{"kind":"unknown","x":1,"y":2}]}),
+    ] {
+        let mut invalid = land.clone();
+        invalid["economy"] = invalid_economy;
+        assert!(validator.validate(&invalid).await.is_err());
+    }
+    assert_eq!(validator.validate(&land).await.unwrap(), land);
+}

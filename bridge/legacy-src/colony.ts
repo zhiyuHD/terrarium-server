@@ -11,7 +11,7 @@ export const isNestEntrance = (state: Pick<TerrariumState, 'nests'>, x: number, 
 
 export function emptyEntrancePlot(state: TerrariumState, x: number, y: number, builder?: BugState): boolean {
   return inHabitat(state, x, y) && !state.soil[y * capacity(state).size + x].antBackfilled && !isNestEntrance(state, x, y) &&
-    ![...state.plants, ...state.seeds, ...state.items, ...(state.food ?? []), ...(state.webs ?? []), ...(state.eggs ?? []), ...(state.facilities ?? []), ...state.bugs.filter(b => !b.inside && b !== builder)].some(p => p.x === x && p.y === y);
+    ![...state.plants, ...state.seeds, ...state.items, ...(state.economy?.pots ?? []), ...(state.food ?? []), ...(state.webs ?? []), ...(state.eggs ?? []), ...(state.facilities ?? []), ...state.bugs.filter(b => !b.inside && b !== builder)].some(p => p.x === x && p.y === y);
 }
 
 const distance = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);

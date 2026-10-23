@@ -162,3 +162,72 @@ async fn scene_details_render_land_and_water_without_history_or_replay_payloads(
         StatusCode::NOT_FOUND
     );
 }
+
+#[tokio::test]
+async fn ranks_coin_balances_without_changing_ecology_and_preserves_wallets_in_export() {
+    let dir = TempDir::new().unwrap();
+    let old = dir.path().join("old");
+    fs::create_dir(&old).unwrap();
+    let cases: Vec<Value> = serde_json::from_str(include_str!("fixtures/scores.json")).unwrap();
+    let mut entries = serde_json::Map::new();
+    for (id, earned, spent) in [
+        ("aa", 200, 100),
+        ("bb", 100, 0),
+        ("cc", 300, 0),
+        ("legacy", 0, 0),
+    ] {
+        let mut state = cases[0]["state"].clone();
+        if earned > 0 {
+            state["economy"] = json!({"earned":earned,"spent":spent,"inventory":if spent > 0 {json!({"spring":1})} else {json!({})},"pots":[]});
+        }
+        entries.insert(id.into(),json!({"id":id,"kind":"land","state":state,"score":0,"reportedAt":"2026-10-20T00:00:00Z"}));
+    }
+    fs::write(
+        old.join("leaderboard.json"),
+        Value::Object(entries).to_string(),
+    )
+    .unwrap();
+    fs::write(old.join("credentials.json"), "{}").unwrap();
+    let store = Store::open(dir.path().join("data.sqlite")).unwrap();
+    store.import(LegacySnapshot::read(&old).unwrap()).unwrap();
+    let before = store.summary("land", 20, None).unwrap();
+    let app = router(App {
+        store: store.clone(),
+        release_id: None,
+        release_root: None,
+        ingestion: None,
+    });
+    let (status, ranking) = query(
+        app.clone(),
+        "/api/leaderboard?kind=land&view=coins&limit=1&ownId=bb",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(ranking["total"], 3);
+    assert_eq!(ranking["entries"][0]["id"], "cc");
+    assert_eq!(ranking["own"]["rank"], 3);
+    assert_eq!(ranking["own"]["competitiveRank"], 2);
+    assert_eq!(ranking["own"]["coins"], 100);
+    assert_eq!(ranking["own"]["earned"], 100);
+    assert!(ranking["own"].get("name").is_none());
+    assert_eq!(store.summary("land", 20, None).unwrap(), before);
+    let (_, gallery) = query(app.clone(), "/api/leaderboard?kind=land&view=gallery").await;
+    assert_eq!(gallery["entries"][0]["state"]["economy"]["earned"], 200);
+    for path in [
+        "/api/leaderboard?kind=water&view=coins",
+        "/api/leaderboard?kind=land&view=coins&limit=101",
+        "/api/leaderboard?kind=land&view=coins&limit=0",
+    ] {
+        assert_eq!(query(app.clone(), path).await.0, StatusCode::BAD_REQUEST);
+    }
+    let exported = dir.path().join("exported");
+    store.export(&exported).unwrap();
+    let restored = Store::open(dir.path().join("restored.sqlite")).unwrap();
+    restored
+        .import(LegacySnapshot::read(&exported).unwrap())
+        .unwrap();
+    assert_eq!(
+        restored.coins(20, Some("bb")).unwrap(),
+        store.coins(20, Some("bb")).unwrap()
+    );
+}

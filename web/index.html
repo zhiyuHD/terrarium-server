@@ -101,6 +101,7 @@ async function fetchJson(url,signal,options={}){
 <body>
 <header><div class="wrap nav"><div class="brand"><span class="mark" aria-hidden="true"></span>生态箱<span class="nav-label">OBSERVATORY</span></div><div class="nav-actions"><a href="/forum" class="theme-toggle">邻里花园</a><button type="button" class="theme-toggle" id="theme-toggle" aria-label="主题：跟随系统"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/></svg><span>跟随系统</span></button><div class="live" id="connection" data-state="loading"><span class="dot"></span><span id="connection-label">连接中</span></div></div></div></header>
 <main class="wrap">
+<section class="feedback" aria-label="金币榜"><button class="feedback-toggle" id="coins-toggle" type="button" aria-expanded="false" aria-controls="coins-board">商人的账簿 · 金币榜</button><div id="coins-board" hidden></div></section>
 <section id="announcements" class="announcements" aria-label="服务端公告" aria-live="polite" hidden></section>
 <section class="hero"><div><p class="eyebrow">CORTICO / LIVING ECOSYSTEMS</p><h1>一方天地，<br>自有<span>生机。</span></h1><p class="intro">观察植物生长、虫鱼觅食，看看每个生态箱的近况。</p></div><div class="release-art" data-version="<!-- LOGO_VERSION -->"><!-- RELEASE_LOGO --></div></section>
 <section class="overview" aria-label="生态箱概览"><div class="stat"><strong id="box-count">—</strong><span id="box-count-label">地箱</span></div><div class="stat"><strong id="plant-count">—</strong><span>植物</span></div><div class="stat"><strong id="animal-count">—</strong><span id="animal-count-label">虫子</span></div></section>
@@ -210,6 +211,22 @@ document.querySelectorAll('.tab').forEach(button=>button.addEventListener('click
 $('search').addEventListener('input',()=>{requestVersion++;requestAbort?.abort();loading=true;clearTimeout(searchTimer);searchTimer=setTimeout(()=>goPage(1),250)});$('clear-search').addEventListener('click',()=>{$('search').value='';$('search').focus();goPage(1)});$('retry').addEventListener('click',()=>void load());
 const announcementTimer=setInterval(()=>{if(!document.hidden)void loadAnnouncements()},30000),pollTimer=setInterval(()=>{if(!loading&&!document.hidden)void load()},15000);
 document.addEventListener('visibilitychange',()=>{for(const view of scenes.values())updateActivity(view);if(document.hidden){requestVersion++;requestAbort?.abort();loading=false;for(const animation of animations)animation.cancel()}else{void load();void loadAnnouncements()}});
+let coinsOpen=false,coinsLoading=false;
+$('coins-toggle').addEventListener('click',async()=>{
+ coinsOpen=!coinsOpen;$('coins-toggle').setAttribute('aria-expanded',String(coinsOpen));$('coins-board').hidden=!coinsOpen;
+ if(!coinsOpen||coinsLoading)return;coinsLoading=true;
+ const board=$('coins-board');board.replaceChildren(el('p','','正在翻阅商人的账簿…'));
+ try{
+  const {response,value:data}=await fetchJson('/api/leaderboard?kind=land&view=coins&limit=20',undefined,{cache:'no-store'});
+  if(!response.ok||data.metric!=='coins'||!Array.isArray(data.entries))throw Error('暂时无法读取金币榜');
+  board.replaceChildren(el('p','','按上次提交的金币余额排名；购买花盆会降低余额。与生态积分分开计算。'));
+  const list=el('ol','');
+  for(const row of data.entries){const item=el('li','');item.append(el('strong','',row.name||'未命名生态箱'),document.createTextNode(` · ${row.coins} 金币 · 累计收入 ${row.earned}`));list.append(item)}
+  board.append(data.entries.length?list:el('p','','商人还没收到第一株植物。'));
+  if(coinsOpen)animate(board,[{transform:'translateY(-8px)'},{transform:'translateY(0)'}],{duration:220,easing:'ease-out'});
+ }catch(error){board.replaceChildren(el('p','','暂时无法读取金币榜，收起后可重试。'))}
+ finally{coinsLoading=false}
+});
 void loadAnnouncements();void load();
 window.addEventListener('pagehide',event=>{if(event.persisted)return;requestVersion++;requestAbort?.abort();clearTimeout(searchTimer);clearInterval(announcementTimer);clearInterval(pollTimer);observer?.disconnect();sort.dispose();clearViews();for(const animation of animations)animation.cancel()});
 </script>

@@ -1,7 +1,7 @@
-// worker.ts
+// ../terrarium-server/bridge/worker.ts
 import { createInterface } from "node:readline";
 
-// legacy-src/scoring.ts
+// ../terrarium-server/bridge/legacy-src/scoring.ts
 var TERRARIUM_SCORE_VERSION = 2;
 function speciesScore(organisms, value) {
   const groups = /* @__PURE__ */ new Map();
@@ -29,7 +29,7 @@ function score(state) {
   return Object.values(scoreParts(state)).reduce((sum, part) => sum + part, 0);
 }
 
-// legacy-src/progression.ts
+// ../terrarium-server/bridge/legacy-src/progression.ts
 var TERRARIUM_LEVELS = [
   { level: 1, requiredScore: 0, size: 5, organisms: 12, collection: 48 },
   { level: 2, requiredScore: 120, size: 6, organisms: 18, collection: 64 },
@@ -84,60 +84,7 @@ function validDevelopment(value, habitat) {
   return value.facilities === void 0 || Array.isArray(value.facilities) && value.facilities.length <= Object.values(TERRARIUM_FACILITIES).filter((f) => f.habitat === habitat).length && new Set(value.facilities.map((f) => f?.kind)).size === value.facilities.length && value.facilities.every((f) => f && Object.hasOwn(TERRARIUM_FACILITIES, f.kind) && TERRARIUM_FACILITIES[f.kind].habitat === habitat && capacity(value).level >= TERRARIUM_FACILITIES[f.kind].level && inHabitat(value, f.x, f.y) && typeof f.enabled === "boolean");
 }
 
-// legacy-src/habitat.ts
-var TERRARIUM_PLANT_REQUIREMENTS = {
-  fern: { minMoisture: 30, maxMoisture: 85, minLight: 0.15, maxLight: 0.7 },
-  clover: { minMoisture: 20, maxMoisture: 80, minLight: 0.45, maxLight: 1 },
-  moss: { minMoisture: 45, maxMoisture: 90, minLight: 0.15, maxLight: 0.4 },
-  basil: { minMoisture: 30, maxMoisture: 75, minLight: 0.65, maxLight: 1 },
-  bean: { minMoisture: 25, maxMoisture: 70, minLight: 0.7, maxLight: 1 },
-  sunflower: { minMoisture: 25, maxMoisture: 70, minLight: 0.75, maxLight: 1 },
-  daisy: { minMoisture: 25, maxMoisture: 75, minLight: 0.6, maxLight: 1 },
-  lavender: { minMoisture: 20, maxMoisture: 60, minLight: 0.7, maxLight: 1 },
-  mint: { minMoisture: 35, maxMoisture: 85, minLight: 0.3, maxLight: 0.85 }
-};
-var TERRARIUM_MAX_HISTORY = 168;
-var TERRARIUM_SUNFLOWER = { seedHours: 30, seedIntervalHours: 12, seedPortions: 3 };
-function sunflowerSeedRounds(growthHours) {
-  return Math.max(0, Math.floor((growthHours - TERRARIUM_SUNFLOWER.seedHours) / TERRARIUM_SUNFLOWER.seedIntervalHours) + 1);
-}
-
-// legacy-src/pollination.ts
-var TERRARIUM_POLLINATION = { nectarIntervalMs: 30 * 6e4, maxCharges: 3, bonusSeedPortions: 2 };
-function isPollinator(species) {
-  return species === "bee" || species === "butterfly";
-}
-function producesSeeds(species) {
-  return ["sunflower", "daisy", "lavender"].includes(species);
-}
-
-// legacy-src/fish-breeding.ts
-var TERRARIUM_FISH_BREEDING = { maturityHours: 24, juvenileHours: 12, intervalHours: 12, incubationHours: 4, eggsPerClutch: 2 };
-var TERRARIUM_SPAWNING_SPECIES = ["neon_tetra", "corydoras"];
-
-// legacy-src/care-alerts.ts
-function validCareAlerts(value) {
-  return value === void 0 || !!value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length <= 100 && Object.entries(value).every(([key, v]) => key.length <= 100 && v && [1, 2].includes(v.severity) && typeof v.label === "string" && v.label.length <= 200);
-}
-
-// legacy-src/deaths.ts
-var TERRARIUM_MAX_DEATH_RECORDS = 48;
-function validDeaths(value, atMs, gridSize = 5) {
-  if (value === void 0) return true;
-  return Array.isArray(value) && value.length <= TERRARIUM_MAX_DEATH_RECORDS && value.every((r, i) => {
-    if (!r || !Number.isFinite(r.recordedAtMs) || r.recordedAtMs > atMs || i > 0 && r.recordedAtMs < value[i - 1].recordedAtMs || typeof r.cause !== "string" || r.cause.length > 1e3) return false;
-    const o = r.organism;
-    return o && typeof o.id === "string" && o.id.length <= 32 && typeof o.species === "string" && o.species.length <= 32 && [o.x, o.y].every((n) => Number.isInteger(n) && n >= 0 && n < gridSize) && ["energy", "hunger", "health", "ageHours"].every((k) => o[k] === void 0 || Number.isFinite(o[k]) && o[k] >= 0) && validMeal(o.lastMeal, r.recordedAtMs) && r.environment && typeof r.environment === "object" && !Array.isArray(r.environment) && Object.keys(r.environment).length <= 10 && Object.values(r.environment).every((v) => typeof v === "number" ? Number.isFinite(v) : typeof v === "string" && v.length <= 100);
-  });
-}
-function validMeal(value, atMs) {
-  if (value === void 0) return true;
-  if (!value || typeof value !== "object") return false;
-  const meal = value;
-  return Number.isFinite(meal.atMs) && meal.atMs <= atMs && typeof meal.kind === "string" && meal.kind.length <= 32 && (meal.id === void 0 || typeof meal.id === "string" && meal.id.length <= 32);
-}
-
-// legacy-src/colony.ts
+// ../terrarium-server/bridge/legacy-src/colony.ts
 var TERRARIUM_NEST_SIZE = 4;
 var TERRARIUM_NEST_MAX_SIZE = 8;
 var TERRARIUM_NEST_DIG_ACTIONS = 12;
@@ -157,11 +104,101 @@ function validColony(state) {
   return state.bugs.every((bug) => (bug.role === void 0 || bug.species === "ant" && ["queen", "worker"].includes(bug.role)) && validResident(bug)) && state.bugs.filter((bug) => bug.role === "queen").length <= 1 && (state.eggs ?? []).every(validResident);
 }
 
-// legacy-src/replay.ts
+// ../terrarium-server/bridge/legacy-src/merchant.ts
+var TERRARIUM_MAX_COINS = 1e9;
+var TERRARIUM_POTS = {
+  clay: { name: "\u7D20\u9676\u76C6", price: 24, effect: "\u6696\u9676\u8272\u88C5\u9970\uFF0C\u65E0\u989D\u5916\u6548\u679C", growth: 1, evaporation: 1, light: 0, recovery: 0, drain: 0 },
+  porcelain: { name: "\u9752\u74F7\u76C6", price: 40, effect: "\u9752\u74F7\u4E0E\u7EC6\u53F6\u7EB9\u88C5\u9970\uFF0C\u65E0\u989D\u5916\u6548\u679C", growth: 1, evaporation: 1, light: 0, recovery: 0, drain: 0 },
+  spring: { name: "\u6625\u9192\u76C6", price: 100, effect: "\u81EA\u7136\u751F\u957F \xD71.5\uFF0C\u84B8\u53D1 \xD71.3", growth: 1.5, evaporation: 1.3, light: 0, recovery: 0, drain: 0 },
+  slow: { name: "\u7F13\u65F6\u76C6", price: 60, effect: "\u81EA\u7136\u751F\u957F \xD70.5\uFF0C\u84B8\u53D1 \xD70.8", growth: 0.5, evaporation: 0.8, light: 0, recovery: 0, drain: 0 },
+  still: { name: "\u7559\u666F\u76C6", price: 120, effect: "\u505C\u6B62\u840C\u53D1\u548C\u751F\u957F\uFF0C\u7981\u6B62\u65BD\u80A5\uFF1B\u6C34\u5206\u3001\u5065\u5EB7\u548C\u91C7\u98DF\u4ECD\u6B63\u5E38\u7ED3\u7B97", growth: 0, evaporation: 1, light: 0, recovery: 0, drain: 0 },
+  reservoir: { name: "\u84C4\u9732\u76C6", price: 80, effect: "\u84B8\u53D1 \xD70.45\uFF1B\u4E0D\u81EA\u52A8\u6D47\u6C34", growth: 1, evaporation: 0.45, light: 0, recovery: 0, drain: 0 },
+  drainage: { name: "\u900F\u96E8\u76C6", price: 60, effect: "\u6BCF\u5C0F\u65F6\u989D\u5916\u6392\u51FA 2 \u6C34\u5206\uFF0C\u6700\u4F4E\u6392\u5230 60\uFF1B\u4ECD\u4F1A\u81EA\u7136\u84B8\u53D1", growth: 1, evaporation: 1, light: 0, recovery: 0, drain: 2 },
+  shade: { name: "\u82D4\u836B\u76C6", price: 80, effect: "\u672C\u683C\u767D\u5929\u5149\u7167 \xD70.55\uFF0C\u84B8\u53D1 \xD70.8", growth: 1, evaporation: 0.8, light: -0.45, recovery: 0, drain: 0 },
+  sun: { name: "\u6620\u65E5\u76C6", price: 120, effect: "\u672C\u683C\u767D\u5929\u5149\u7167 +0.25\uFF0C\u4E0A\u9650 1\uFF1B\u4E0D\u6539\u53D8\u663C\u591C", growth: 1, evaporation: 1, light: 0.25, recovery: 0, drain: 0 },
+  healing: { name: "\u517B\u53F6\u76C6", price: 160, effect: "\u9002\u5B9C\u767D\u5929\u6BCF\u5C0F\u65F6\u6062\u590D 1 \u5065\u5EB7\u53CA 2 \u53F6\u635F\uFF1B\u81EA\u7136\u751F\u957F \xD70.8", growth: 0.8, evaporation: 1, light: 0, recovery: 1, drain: 0 }
+};
+function validEconomy(state) {
+  const e = state.economy;
+  if (e === void 0) return true;
+  if (!e || !Number.isSafeInteger(e.earned) || e.earned < 0 || e.earned > TERRARIUM_MAX_COINS || !Number.isSafeInteger(e.spent) || e.spent < 0 || e.spent > e.earned || !e.inventory || typeof e.inventory !== "object" || Array.isArray(e.inventory) || !Array.isArray(e.pots) || e.pots.length > 64) return false;
+  let owned = e.pots.length, cost = 0;
+  for (const [kind, count] of Object.entries(e.inventory)) {
+    if (!Object.hasOwn(TERRARIUM_POTS, kind) || !Number.isSafeInteger(count) || count < 0 || count > 64) return false;
+    owned += count;
+    cost += TERRARIUM_POTS[kind].price * count;
+  }
+  for (const p of e.pots) {
+    if (!p || !Object.hasOwn(TERRARIUM_POTS, p.kind) || !inHabitat(state, p.x, p.y)) return false;
+    cost += TERRARIUM_POTS[p.kind].price;
+  }
+  return owned <= 64 && cost === e.spent && new Set(e.pots.map((p) => `${p.x},${p.y}`)).size === e.pots.length;
+}
+var TERRARIUM_MERCHANT_TOOL_DECL = {
+  name: "terrarium_merchant",
+  tags: ["read", "write"],
+  description: "Land merchant and pot shop. status returns coins, inventory, catalog and plant sale quotes. sell permanently removes a living land plant by id: requires 6 natural growth hours and health >=40; fertilizer grants no sale value. buy purchases one pot into inventory; place equips it at x,y (replaced pot returns to inventory); remove returns a placed pot. Pots stay when plants are sold, composted, collected or die. One effect per plot; no stacking. still blocks fertilizer but does not freeze health, water or insects. Coins are local snapshot data, separate from ecology score; decorative coin item is unrelated.",
+  parameters: { type: "object", additionalProperties: false, properties: { action: { type: "string", enum: ["status", "sell", "buy", "place", "remove"] }, id: { type: "string" }, pot: { type: "string", enum: Object.keys(TERRARIUM_POTS) }, x: { type: "integer", minimum: 0 }, y: { type: "integer", minimum: 0 } } }
+};
+
+// ../terrarium-server/bridge/legacy-src/habitat.ts
+var TERRARIUM_PLANT_REQUIREMENTS = {
+  fern: { minMoisture: 30, maxMoisture: 85, minLight: 0.15, maxLight: 0.7 },
+  clover: { minMoisture: 20, maxMoisture: 80, minLight: 0.45, maxLight: 1 },
+  moss: { minMoisture: 45, maxMoisture: 90, minLight: 0.15, maxLight: 0.4 },
+  basil: { minMoisture: 30, maxMoisture: 75, minLight: 0.65, maxLight: 1 },
+  bean: { minMoisture: 25, maxMoisture: 70, minLight: 0.7, maxLight: 1 },
+  sunflower: { minMoisture: 25, maxMoisture: 70, minLight: 0.75, maxLight: 1 },
+  daisy: { minMoisture: 25, maxMoisture: 75, minLight: 0.6, maxLight: 1 },
+  lavender: { minMoisture: 20, maxMoisture: 60, minLight: 0.7, maxLight: 1 },
+  mint: { minMoisture: 35, maxMoisture: 85, minLight: 0.3, maxLight: 0.85 }
+};
+var TERRARIUM_MAX_HISTORY = 168;
+var TERRARIUM_SUNFLOWER = { seedHours: 30, seedIntervalHours: 12, seedPortions: 3 };
+function sunflowerSeedRounds(growthHours) {
+  return Math.max(0, Math.floor((growthHours - TERRARIUM_SUNFLOWER.seedHours) / TERRARIUM_SUNFLOWER.seedIntervalHours) + 1);
+}
+
+// ../terrarium-server/bridge/legacy-src/pollination.ts
+var TERRARIUM_POLLINATION = { nectarIntervalMs: 30 * 6e4, maxCharges: 3, bonusSeedPortions: 2 };
+function isPollinator(species) {
+  return species === "bee" || species === "butterfly";
+}
+function producesSeeds(species) {
+  return ["sunflower", "daisy", "lavender"].includes(species);
+}
+
+// ../terrarium-server/bridge/legacy-src/fish-breeding.ts
+var TERRARIUM_FISH_BREEDING = { maturityHours: 24, juvenileHours: 12, intervalHours: 12, incubationHours: 4, eggsPerClutch: 2 };
+var TERRARIUM_SPAWNING_SPECIES = ["neon_tetra", "corydoras"];
+
+// ../terrarium-server/bridge/legacy-src/care-alerts.ts
+function validCareAlerts(value) {
+  return value === void 0 || !!value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length <= 100 && Object.entries(value).every(([key, v]) => key.length <= 100 && v && [1, 2].includes(v.severity) && typeof v.label === "string" && v.label.length <= 200);
+}
+
+// ../terrarium-server/bridge/legacy-src/deaths.ts
+var TERRARIUM_MAX_DEATH_RECORDS = 48;
+function validDeaths(value, atMs, gridSize = 5) {
+  if (value === void 0) return true;
+  return Array.isArray(value) && value.length <= TERRARIUM_MAX_DEATH_RECORDS && value.every((r, i) => {
+    if (!r || !Number.isFinite(r.recordedAtMs) || r.recordedAtMs > atMs || i > 0 && r.recordedAtMs < value[i - 1].recordedAtMs || typeof r.cause !== "string" || r.cause.length > 1e3) return false;
+    const o = r.organism;
+    return o && typeof o.id === "string" && o.id.length <= 32 && typeof o.species === "string" && o.species.length <= 32 && [o.x, o.y].every((n) => Number.isInteger(n) && n >= 0 && n < gridSize) && ["energy", "hunger", "health", "ageHours"].every((k) => o[k] === void 0 || Number.isFinite(o[k]) && o[k] >= 0) && validMeal(o.lastMeal, r.recordedAtMs) && r.environment && typeof r.environment === "object" && !Array.isArray(r.environment) && Object.keys(r.environment).length <= 10 && Object.values(r.environment).every((v) => typeof v === "number" ? Number.isFinite(v) : typeof v === "string" && v.length <= 100);
+  });
+}
+function validMeal(value, atMs) {
+  if (value === void 0) return true;
+  if (!value || typeof value !== "object") return false;
+  const meal = value;
+  return Number.isFinite(meal.atMs) && meal.atMs <= atMs && typeof meal.kind === "string" && meal.kind.length <= 32 && (meal.id === void 0 || typeof meal.id === "string" && meal.id.length <= 32);
+}
+
+// ../terrarium-server/bridge/legacy-src/replay.ts
 var TERRARIUM_MAX_REPLAYS = 16;
 var TERRARIUM_REPLAY_RETENTION_MS = 7 * 24 * 60 * 6e4;
 
-// legacy-src/aquatic-habitat.ts
+// ../terrarium-server/bridge/legacy-src/aquatic-habitat.ts
 var TERRARIUM_FISH_SPECIES = ["guppy", "goldfish", "perch", "neon_tetra", "corydoras"];
 var TERRARIUM_AQUATIC_PLANTS = {
   waterweed: { dayOxygen: 0.8, nightOxygen: -0.2, purification: 0 },
@@ -171,7 +208,7 @@ var TERRARIUM_AQUATIC_PLANTS = {
   duckweed: { dayOxygen: 0.6, nightOxygen: -0.15, purification: 0.12 }
 };
 
-// legacy-src/aquarium.ts
+// ../terrarium-server/bridge/legacy-src/aquarium.ts
 var HOUR_MS = 36e5;
 var TERRARIUM_FISH_ACTION_INTERVAL_MS = 10 * 6e4;
 var percent = (value) => Number.isFinite(value) && value >= 0 && value <= 100;
@@ -215,7 +252,7 @@ function validAquarium(value) {
   });
 }
 
-// legacy-src/collection.ts
+// ../terrarium-server/bridge/legacy-src/collection.ts
 function validCollection(value, habitat, limit = 48) {
   if (value === void 0) return true;
   if (!Array.isArray(value) || value.length > limit || new Set(value.map((e) => e?.specimen?.id)).size !== value.length) return false;
@@ -251,13 +288,13 @@ function validCollection(value, habitat, limit = 48) {
   });
 }
 
-// legacy-src/flight.ts
+// ../terrarium-server/bridge/legacy-src/flight.ts
 var TERRARIUM_FLY_SPECIES = ["fruit_fly", "mosquito", "moth", "bee", "butterfly"];
 function isFlying(species) {
   return TERRARIUM_FLY_SPECIES.includes(species);
 }
 
-// legacy-src/state.ts
+// ../terrarium-server/bridge/legacy-src/state.ts
 var TERRARIUM_MAX_NAME_LENGTH = 64;
 function validName(value) {
   return typeof value === "string" && value === value.trim() && Array.from(value).length >= 1 && Array.from(value).length <= TERRARIUM_MAX_NAME_LENGTH && !/[\u0000-\u001f\u007f-\u009f]/.test(value);
@@ -268,8 +305,8 @@ var HOUR_MS2 = 60 * 6e4;
 var TERRARIUM_MAX_CATCHUP_MS = 30 * 24 * HOUR_MS2;
 function newState(nowMs) {
   const state = { version: 3, soil: Array.from({ length: 25 }, (_, i) => ({ x: i % 5, y: Math.floor(i / 5), moisture: 50 })), history: [], updatedAtMs: nowMs, nextId: 1, plants: [
-    { id: "fern", species: "fern", x: 0, y: 0, moisture: 45, growthHours: 0, stage: 0, dry: false, health: 100 },
-    { id: "clover", species: "clover", x: 4, y: 0, moisture: 50, growthHours: 0, stage: 0, dry: false, health: 100 }
+    { id: "fern", species: "fern", x: 0, y: 0, moisture: 45, growthHours: 0, naturalGrowthHours: 0, stage: 0, dry: false, health: 100 },
+    { id: "clover", species: "clover", x: 4, y: 0, moisture: 50, growthHours: 0, naturalGrowthHours: 0, stage: 0, dry: false, health: 100 }
   ], seeds: [], bugs: [], items: [{ id: "coin", x: 1, y: 1 }, { id: "pebble", x: 2, y: 1 }] };
   for (const plant of state.plants) state.soil[plant.y * capacity(state).size + plant.x].moisture = plant.moisture;
   recordHistory2(state, nowMs);
@@ -334,11 +371,11 @@ function validReplays(state) {
 function validState(value) {
   if (!value || typeof value !== "object") return false;
   const state = value;
-  if (state.fertilizer !== void 0 && (!Number.isSafeInteger(state.fertilizer) || state.fertilizer < 0) || !validDevelopment(state, "land") || !validCareAlerts(state.careAlerts) || !validDeaths(state.deaths, state.updatedAtMs, capacity(state).size) || !validCollection(state.collection, "land", capacity(state).collection) || state.irrigation !== void 0 && (!Array.isArray(state.irrigation) || state.irrigation.length > capacity(state).size ** 2 || new Set(state.irrigation.map((c) => `${c?.x},${c?.y}`)).size !== state.irrigation.length || !state.irrigation.every((c) => c && inHabitat(state, c.x, c.y) && Number.isFinite(c.targetMoisture) && c.targetMoisture >= 0 && c.targetMoisture <= 100 && Number.isFinite(c.intervalMinutes) && c.intervalMinutes >= 1 && c.intervalMinutes <= 1440 && Number.isFinite(c.lastWateredAtMs)))) return false;
-  return state.version === 3 && (state.name === void 0 || validName(state.name)) && validHabitat(state) && validReplays(state) && Number.isFinite(state.updatedAtMs) && Number.isSafeInteger(state.nextId) && state.nextId >= 1 && Array.isArray(state.plants) && state.plants.length <= capacity(state).organisms && state.plants.every((p) => p && typeof p.id === "string" && p.id.length <= 32 && Object.hasOwn(TERRARIUM_PLANT_REQUIREMENTS, p.species) && inHabitat(state, p.x, p.y) && Number.isFinite(p.moisture) && p.moisture >= 0 && p.moisture <= 100 && Number.isFinite(p.growthHours) && p.growthHours >= 0 && Number.isInteger(p.stage) && p.stage >= 0 && p.stage <= 3 && typeof p.dry === "boolean" && Number.isFinite(p.health) && p.health >= 0 && p.health <= 100 && (p.pollination === void 0 || Number.isSafeInteger(p.pollination) && p.pollination >= 0 && p.pollination <= TERRARIUM_POLLINATION.maxCharges) && (p.healthWarning === void 0 || typeof p.healthWarning === "boolean") && (p.leafDamage === void 0 || Number.isFinite(p.leafDamage) && p.leafDamage >= 0 && p.leafDamage <= 100) && (p.seedRounds === void 0 || producesSeeds(p.species) && Number.isSafeInteger(p.seedRounds) && p.seedRounds >= 0 && p.seedRounds <= sunflowerSeedRounds(p.growthHours))) && Array.isArray(state.seeds) && state.seeds.length <= capacity(state).organisms && state.plants.length + state.seeds.length <= capacity(state).organisms && state.seeds.every((s) => s && typeof s.id === "string" && Object.hasOwn(TERRARIUM_PLANT_REQUIREMENTS, s.species) && inHabitat(state, s.x, s.y) && Number.isFinite(s.ageHours) && s.ageHours >= 0) && Array.isArray(state.bugs) && state.bugs.length <= capacity(state).organisms && state.bugs.every((b) => b && typeof b.id === "string" && (["aphid", "beetle", "ladybug", "spider", "ant"].includes(b.species) || isFlying(b.species)) && inHabitat(state, b.x, b.y) && Number.isFinite(b.energy) && b.energy >= 0 && b.energy <= 100 && (b.pollen === void 0 || isPollinator(b.species) && b.pollen && typeof b.pollen.plantId === "string" && b.pollen.plantId.length >= 1 && b.pollen.plantId.length <= 32 && Object.hasOwn(TERRARIUM_PLANT_REQUIREMENTS, b.pollen.species)) && validMeal(b.lastMeal, state.updatedAtMs) && (b.hunger === void 0 || Number.isFinite(b.hunger) && b.hunger >= 0 && b.hunger <= 100) && (b.carrying === void 0 || b.species === "ant" && Number.isInteger(b.carrying) && b.carrying >= 0 && b.carrying <= 5) && Number.isFinite(b.ageHours) && b.ageHours >= 0) && (state.eggs === void 0 || Array.isArray(state.eggs) && state.eggs.length <= capacity(state).organisms && state.eggs.every((egg) => egg && typeof egg.id === "string" && egg.id.length <= 32 && (["beetle", "ladybug", "spider", "ant"].includes(egg.species) || isFlying(egg.species)) && inHabitat(state, egg.x, egg.y) && Number.isFinite(egg.laidAtMs) && egg.laidAtMs <= state.updatedAtMs && Number.isFinite(egg.hatchesAtMs) && egg.hatchesAtMs > egg.laidAtMs && egg.hatchesAtMs <= egg.laidAtMs + 6 * HOUR_MS2)) && state.bugs.length + (state.eggs?.length ?? 0) <= capacity(state).organisms && (state.nests === void 0 || Array.isArray(state.nests) && state.nests.length <= 5 && state.nests.every((nest) => nest && typeof nest.id === "string" && nest.id.length <= 32 && inHabitat(state, nest.x, nest.y) && Number.isInteger(nest.depth) && nest.depth >= 1 && nest.depth <= 5 && Number.isInteger(nest.food) && nest.food >= 0 && nest.food <= nest.depth * 20) && new Set(state.nests.map((nest) => `${nest.x},${nest.y}`)).size === state.nests.length) && (state.food === void 0 || Array.isArray(state.food) && state.food.length <= 20 && state.food.every((food) => food && typeof food.id === "string" && food.id.length <= 32 && inHabitat(state, food.x, food.y) && Number.isInteger(food.portions) && food.portions >= 1 && food.portions <= 10 && Number.isFinite(food.droppedAtMs) && food.droppedAtMs <= state.updatedAtMs && (food.kind === void 0 || food.kind === "sunflower_seed" || food.kind === "flower_seed"))) && (state.webs === void 0 || Array.isArray(state.webs) && state.webs.length <= capacity(state).organisms * TERRARIUM_WEBS_PER_SPIDER && state.webs.every((web) => web && typeof web.id === "string" && web.id.length <= 32 && typeof web.spiderId === "string" && inHabitat(state, web.x, web.y) && Number.isFinite(web.createdAtMs) && web.createdAtMs <= state.updatedAtMs && state.bugs.some((bug) => bug.id === web.spiderId && bug.species === "spider")) && new Set(state.webs.map((web) => `${web.x},${web.y}`)).size === state.webs.length && state.bugs.every((bug) => state.webs.filter((web) => web.spiderId === bug.id).length <= TERRARIUM_WEBS_PER_SPIDER)) && Array.isArray(state.items) && state.items.length === 2 && ["coin", "pebble"].every((id) => state.items.filter((item) => item.id === id && inHabitat(state, item.x, item.y)).length === 1) && !(state.items[0].x === state.items[1].x && state.items[0].y === state.items[1].y) && new Set([...state.plants, ...state.seeds, ...state.bugs, ...state.eggs ?? [], ...state.nests ?? [], ...state.food ?? [], ...state.webs ?? [], ...(state.collection ?? []).map((e) => e.specimen)].map((v) => v.id)).size === (state.collection?.length ?? 0) + state.plants.length + state.seeds.length + state.bugs.length + (state.eggs?.length ?? 0) + (state.nests?.length ?? 0) + (state.food?.length ?? 0) + (state.webs?.length ?? 0) && new Set([...state.plants, ...state.seeds].map((v) => `${v.x},${v.y}`)).size === state.plants.length + state.seeds.length && validColony(state);
+  if (!validEconomy(state) || state.fertilizer !== void 0 && (!Number.isSafeInteger(state.fertilizer) || state.fertilizer < 0) || !validDevelopment(state, "land") || !validCareAlerts(state.careAlerts) || !validDeaths(state.deaths, state.updatedAtMs, capacity(state).size) || !validCollection(state.collection, "land", capacity(state).collection) || state.irrigation !== void 0 && (!Array.isArray(state.irrigation) || state.irrigation.length > capacity(state).size ** 2 || new Set(state.irrigation.map((c) => `${c?.x},${c?.y}`)).size !== state.irrigation.length || !state.irrigation.every((c) => c && inHabitat(state, c.x, c.y) && Number.isFinite(c.targetMoisture) && c.targetMoisture >= 0 && c.targetMoisture <= 100 && Number.isFinite(c.intervalMinutes) && c.intervalMinutes >= 1 && c.intervalMinutes <= 1440 && Number.isFinite(c.lastWateredAtMs)))) return false;
+  return state.version === 3 && (state.name === void 0 || validName(state.name)) && validHabitat(state) && validReplays(state) && Number.isFinite(state.updatedAtMs) && Number.isSafeInteger(state.nextId) && state.nextId >= 1 && Array.isArray(state.plants) && state.plants.length <= capacity(state).organisms && state.plants.every((p) => p && typeof p.id === "string" && p.id.length <= 32 && Object.hasOwn(TERRARIUM_PLANT_REQUIREMENTS, p.species) && inHabitat(state, p.x, p.y) && Number.isFinite(p.moisture) && p.moisture >= 0 && p.moisture <= 100 && Number.isFinite(p.growthHours) && p.growthHours >= 0 && (p.naturalGrowthHours === void 0 || Number.isFinite(p.naturalGrowthHours) && p.naturalGrowthHours >= 0 && p.naturalGrowthHours <= 48 && p.naturalGrowthHours <= p.growthHours + 1e-8) && Number.isInteger(p.stage) && p.stage >= 0 && p.stage <= 3 && typeof p.dry === "boolean" && Number.isFinite(p.health) && p.health >= 0 && p.health <= 100 && (p.pollination === void 0 || Number.isSafeInteger(p.pollination) && p.pollination >= 0 && p.pollination <= TERRARIUM_POLLINATION.maxCharges) && (p.healthWarning === void 0 || typeof p.healthWarning === "boolean") && (p.leafDamage === void 0 || Number.isFinite(p.leafDamage) && p.leafDamage >= 0 && p.leafDamage <= 100) && (p.seedRounds === void 0 || producesSeeds(p.species) && Number.isSafeInteger(p.seedRounds) && p.seedRounds >= 0 && p.seedRounds <= sunflowerSeedRounds(p.growthHours))) && Array.isArray(state.seeds) && state.seeds.length <= capacity(state).organisms && state.plants.length + state.seeds.length <= capacity(state).organisms && state.seeds.every((s) => s && typeof s.id === "string" && Object.hasOwn(TERRARIUM_PLANT_REQUIREMENTS, s.species) && inHabitat(state, s.x, s.y) && Number.isFinite(s.ageHours) && s.ageHours >= 0) && Array.isArray(state.bugs) && state.bugs.length <= capacity(state).organisms && state.bugs.every((b) => b && typeof b.id === "string" && (["aphid", "beetle", "ladybug", "spider", "ant"].includes(b.species) || isFlying(b.species)) && inHabitat(state, b.x, b.y) && Number.isFinite(b.energy) && b.energy >= 0 && b.energy <= 100 && (b.pollen === void 0 || isPollinator(b.species) && b.pollen && typeof b.pollen.plantId === "string" && b.pollen.plantId.length >= 1 && b.pollen.plantId.length <= 32 && Object.hasOwn(TERRARIUM_PLANT_REQUIREMENTS, b.pollen.species)) && validMeal(b.lastMeal, state.updatedAtMs) && (b.hunger === void 0 || Number.isFinite(b.hunger) && b.hunger >= 0 && b.hunger <= 100) && (b.carrying === void 0 || b.species === "ant" && Number.isInteger(b.carrying) && b.carrying >= 0 && b.carrying <= 5) && Number.isFinite(b.ageHours) && b.ageHours >= 0) && (state.eggs === void 0 || Array.isArray(state.eggs) && state.eggs.length <= capacity(state).organisms && state.eggs.every((egg) => egg && typeof egg.id === "string" && egg.id.length <= 32 && (["beetle", "ladybug", "spider", "ant"].includes(egg.species) || isFlying(egg.species)) && inHabitat(state, egg.x, egg.y) && Number.isFinite(egg.laidAtMs) && egg.laidAtMs <= state.updatedAtMs && Number.isFinite(egg.hatchesAtMs) && egg.hatchesAtMs > egg.laidAtMs && egg.hatchesAtMs <= egg.laidAtMs + 6 * HOUR_MS2)) && state.bugs.length + (state.eggs?.length ?? 0) <= capacity(state).organisms && (state.nests === void 0 || Array.isArray(state.nests) && state.nests.length <= 5 && state.nests.every((nest) => nest && typeof nest.id === "string" && nest.id.length <= 32 && inHabitat(state, nest.x, nest.y) && Number.isInteger(nest.depth) && nest.depth >= 1 && nest.depth <= 5 && Number.isInteger(nest.food) && nest.food >= 0 && nest.food <= nest.depth * 20) && new Set(state.nests.map((nest) => `${nest.x},${nest.y}`)).size === state.nests.length) && (state.food === void 0 || Array.isArray(state.food) && state.food.length <= 20 && state.food.every((food) => food && typeof food.id === "string" && food.id.length <= 32 && inHabitat(state, food.x, food.y) && Number.isInteger(food.portions) && food.portions >= 1 && food.portions <= 10 && Number.isFinite(food.droppedAtMs) && food.droppedAtMs <= state.updatedAtMs && (food.kind === void 0 || food.kind === "sunflower_seed" || food.kind === "flower_seed"))) && (state.webs === void 0 || Array.isArray(state.webs) && state.webs.length <= capacity(state).organisms * TERRARIUM_WEBS_PER_SPIDER && state.webs.every((web) => web && typeof web.id === "string" && web.id.length <= 32 && typeof web.spiderId === "string" && inHabitat(state, web.x, web.y) && Number.isFinite(web.createdAtMs) && web.createdAtMs <= state.updatedAtMs && state.bugs.some((bug) => bug.id === web.spiderId && bug.species === "spider")) && new Set(state.webs.map((web) => `${web.x},${web.y}`)).size === state.webs.length && state.bugs.every((bug) => state.webs.filter((web) => web.spiderId === bug.id).length <= TERRARIUM_WEBS_PER_SPIDER)) && Array.isArray(state.items) && state.items.length === 2 && ["coin", "pebble"].every((id) => state.items.filter((item) => item.id === id && inHabitat(state, item.x, item.y)).length === 1) && !(state.items[0].x === state.items[1].x && state.items[0].y === state.items[1].y) && new Set([...state.plants, ...state.seeds, ...state.bugs, ...state.eggs ?? [], ...state.nests ?? [], ...state.food ?? [], ...state.webs ?? [], ...(state.collection ?? []).map((e) => e.specimen)].map((v) => v.id)).size === (state.collection?.length ?? 0) + state.plants.length + state.seeds.length + state.bugs.length + (state.eggs?.length ?? 0) + (state.nests?.length ?? 0) + (state.food?.length ?? 0) + (state.webs?.length ?? 0) && new Set([...state.plants, ...state.seeds].map((v) => `${v.x},${v.y}`)).size === state.plants.length + state.seeds.length && validColony(state);
 }
 
-// worker.ts
+// ../terrarium-server/bridge/worker.ts
 for await (const line of createInterface({ input: process.stdin, crlfDelay: Infinity })) {
   try {
     const raw = JSON.parse(line);
