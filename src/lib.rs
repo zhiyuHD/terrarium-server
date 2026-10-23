@@ -25,6 +25,7 @@ mod forum_recommendation;
 
 pub mod forum_digest;
 
+mod story_seedbed;
 mod story_text;
 
 pub mod photos;

@@ -484,3 +484,250 @@ fn nursery_and_second_door_require_residents_in_the_matching_colony() {
     advance(&s, &mut e, "second-door");
     assert_eq!(notices(&s).len(), 4);
 }
+
+fn seedbed_thread(s: &Store, token: &str) -> i64 {
+    let post = forum::execute(s, &Method::POST, "threads", &HashMap::new(),
+        &json!({"id":"story-author","title":"The potting bench","body":"An optional beginner mystery","clientVersion":"0.8.7"}), token, now_ms()+60001).unwrap();
+    let root = post["id"].as_i64().unwrap();
+    s.update_seedbed_story(&json!({"enabled":true,"threadId":root}))
+        .unwrap();
+    root
+}
+fn seedbed_entry() -> Value {
+    let mut e = granary_entry("garden-first");
+    e["state"]["plants"] = json!([{
+        "id":"clover", "species":"clover", "x":4, "y":0, "moisture":50,
+        "growthHours":18, "stage":3, "health":100, "dry":false
+    }]);
+    e["state"]["nests"][0]["food"] = json!(5);
+    e
+}
+#[test]
+fn seedbed_is_independent_opt_in_and_teaches_in_order_from_existing_ecosystems() {
+    let (_dir, s, token, _) = fixture();
+    let root = seedbed_thread(&s, &token);
+    let mut e = seedbed_entry();
+    advance(&s, &mut e, "not-joined");
+    assert!(notices(&s).is_empty());
+    participate(&s, root, "garden-first");
+    advance(&s, &mut e, "letter-one");
+    assert_eq!(notices(&s).len(), 1);
+    assert_eq!(s.story_status().unwrap()["completedBoxes"], 0);
+    assert_eq!(s.granary_story_status().unwrap()["completedBoxes"], 0);
+    for (i, (field, value)) in [
+        ("health", json!(59.99)),
+        ("moisture", json!(19.99)),
+        ("moisture", json!(80.01)),
+        ("species", json!("fern")),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut bad = e.clone();
+        bad["state"]["plants"][0][field] = value;
+        advance(&s, &mut bad, &format!("bad-soil-{i}"));
+        assert_eq!(notices(&s).len(), 1);
+    }
+    e["state"]["plants"][0]["growthHours"] = json!(0);
+    advance(&s, &mut e, "suitable-no-watering-needed");
+    assert_eq!(notices(&s).len(), 2);
+    e["state"]["plants"][0]["growthHours"] = json!(5.99);
+    advance(&s, &mut e, "wait-for-growth");
+    assert_eq!(notices(&s).len(), 2);
+    e["state"]["plants"][0]["growthHours"] = json!(6);
+    advance(&s, &mut e, "grown");
+    assert_eq!(notices(&s).len(), 3);
+    e["state"]["plants"][0]["growthHours"] = json!(17.99);
+    advance(&s, &mut e, "wait-for-flower");
+    assert_eq!(notices(&s).len(), 3);
+    e["state"]["plants"][0]["growthHours"] = json!(18);
+    advance(&s, &mut e, "flower");
+    assert_eq!(notices(&s).len(), 4);
+    e["state"]["bugs"][0]["inside"]["nestId"] = json!("other");
+    advance(&s, &mut e, "food-in-empty-room");
+    assert_eq!(notices(&s).len(), 4);
+    e["state"]["bugs"][0]["inside"]["nestId"] = json!("nest-1");
+    e["state"]["nests"][0]["food"] = json!(2);
+    advance(&s, &mut e, "not-enough-food");
+    assert_eq!(notices(&s).len(), 4);
+    e["state"]["nests"][0]["food"] = json!(3);
+    advance(&s, &mut e, "resident-and-food");
+    assert_eq!(
+        s.seedbed_story_status().unwrap()["progressCounts"],
+        json!([1, 1, 1, 1, 1, 0])
+    );
+    let sent = notices(&s);
+    assert_eq!(sent.len(), 5);
+    let answer: String = sent[..3]
+        .iter()
+        .flat_map(|n| {
+            n["text"]
+                .as_str()
+                .unwrap()
+                .lines()
+                .take(2)
+                .map(|line| line.chars().next().unwrap())
+        })
+        .collect();
+    assert_eq!(answer, "有人接过水壶");
+    assert!(sent[0]["text"].as_str().unwrap().contains("targetMoisture"));
+    assert!(sent[1]["text"].as_str().unwrap().contains("夜间"));
+    assert!(sent[3]["text"].as_str().unwrap().contains("hunger"));
+}
+#[test]
+fn seedbed_answers_require_same_box_thread_and_new_reply_and_survive_backup_and_export() {
+    let (dir, s, token, other_thread) = fixture();
+    let root = seedbed_thread(&s, &token);
+    participate(&s, root, "garden-first");
+    let mut e = seedbed_entry();
+    reply(&s, root, "garden-first", "[接班]有人接过水壶");
+    for step in 1..=5 {
+        advance(&s, &mut e, &format!("page-{step}"));
+        assert_eq!(notices(&s).len(), step);
+    }
+    advance(&s, &mut e, "old-guess");
+    assert_eq!(notices(&s).len(), 5);
+    reply(&s, root, "garden-second", "[接班]有人接过水壶");
+    reply(&s, other_thread, "garden-first", "[接班]有人接过水壶");
+    reply(&s, root, "garden-first", "[接班]水壶被人拿走");
+    advance(&s, &mut e, "other-box-thread-answer");
+    assert_eq!(notices(&s).len(), 5);
+    reply(&s, root, "garden-first", "调查的答案是：[接班]有人接过水壶");
+    e["state"]["updatedAtMs"] = json!(0);
+    e["reportRevision"] = json!("stale-answer");
+    submit(&s, &e).unwrap();
+    assert_eq!(notices(&s).len(), 5);
+    advance(&s, &mut e, "answer");
+    assert_eq!(s.seedbed_story_status().unwrap()["completedBoxes"], 1);
+    let sent = notices(&s);
+    assert_eq!(sent.len(), 6);
+    for n in &sent {
+        assert_eq!(n["targets"], json!(["garden-first"]));
+        assert!(n["text"].as_str().unwrap().encode_utf16().count() <= 2000);
+        assert!(
+            n["text"]
+                .as_str()
+                .unwrap()
+                .contains("无需为剧情主动联系主人")
+        );
+        s.revoke_announcement(n["id"].as_u64().unwrap()).unwrap();
+    }
+    let output = dir.path().join("seedbed-export");
+    s.export(&output).unwrap();
+    assert!(output.join("story-seedbed.json").is_file());
+    let imported = Store::open(dir.path().join("imported-seedbed.sqlite")).unwrap();
+    imported
+        .import(LegacySnapshot::read(&output).unwrap())
+        .unwrap();
+    assert_eq!(
+        imported.seedbed_story_status().unwrap(),
+        s.seedbed_story_status().unwrap()
+    );
+    let backup = dir.path().join("seedbed-backup.sqlite");
+    s.backup(&backup).unwrap();
+    let restored = Store::existing(&backup).unwrap();
+    assert_eq!(
+        restored.seedbed_story_status().unwrap()["completedBoxes"],
+        1
+    );
+    let reopened = Store::existing(dir.path().join("data.sqlite")).unwrap();
+    advance(&reopened, &mut e, "after-restart-and-revocation");
+    assert!(notices(&reopened).is_empty());
+    assert!(
+        s.update_seedbed_story(&json!({"threadId":other_thread}))
+            .is_err()
+    );
+}
+#[test]
+fn seedbed_is_disabled_by_default_and_ignores_water_and_pre_participation_snapshots() {
+    let (_dir, s, _, root) = fixture();
+    let initial = s.seedbed_story_status().unwrap();
+    assert_eq!(initial["enabled"], false);
+    assert!(
+        initial["openingPost"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("旧温室")
+    );
+    assert!(s.update_seedbed_story(&json!({"enabled":true})).is_err());
+    s.update_seedbed_story(&json!({"threadId":root})).unwrap();
+    participate(&s, root, "garden-first");
+    let mut e = seedbed_entry();
+    advance(&s, &mut e, "disabled");
+    assert!(notices(&s).is_empty());
+    s.update_seedbed_story(&json!({"enabled":true})).unwrap();
+    e["state"]["updatedAtMs"] = json!(0);
+    e["reportRevision"] = json!("stale-join");
+    submit(&s, &e).unwrap();
+    assert!(notices(&s).is_empty());
+    participate(&s, root, "garden-second");
+    let water = entry("garden-second", "water");
+    submit(&s, &water).unwrap();
+    assert!(notices(&s).is_empty());
+    advance(&s, &mut e, "fresh");
+    assert_eq!(notices(&s).len(), 1);
+    s.update_seedbed_story(&json!({"enabled":false})).unwrap();
+    advance(&s, &mut e, "disabled-again");
+    assert_eq!(notices(&s).len(), 1);
+}
+#[test]
+fn seedbed_story_failure_rolls_back_report_and_notice_and_retries_once() {
+    let (dir, s, token, _) = fixture();
+    let root = seedbed_thread(&s, &token);
+    participate(&s, root, "garden-first");
+    let conn = Connection::open(dir.path().join("data.sqlite")).unwrap();
+    conn.execute_batch("CREATE TRIGGER fail_seedbed BEFORE INSERT ON legacy_documents WHEN new.name='story-seedbed.json' BEGIN SELECT RAISE(ABORT,'seedbed write failed'); END;").unwrap();
+    let mut e = seedbed_entry();
+    assert!(submit(&s, &e).is_err());
+    assert!(s.get("garden-first").unwrap().is_none());
+    assert!(notices(&s).is_empty());
+    conn.execute_batch("DROP TRIGGER fail_seedbed;").unwrap();
+    advance(&s, &mut e, "retry");
+    assert_eq!(notices(&s).len(), 1);
+    assert!(!s.commit_entry(&e, None).unwrap());
+    assert_eq!(notices(&s).len(), 1);
+    let output = dir.path().join("corrupt-seedbed");
+    s.export(&output).unwrap();
+    let path = output.join("story-seedbed.json");
+    let mut document: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    for step in [0, 5, 7] {
+        document["deliveries"]["garden-first"]["step"] = json!(step);
+        std::fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
+        assert!(LegacySnapshot::read(&output).is_err());
+    }
+}
+
+#[test]
+fn seedbed_full_notice_queue_defers_the_page_without_dropping_the_report() {
+    let (dir, s, token, _) = fixture();
+    let root = seedbed_thread(&s, &token);
+    participate(&s, root, "garden-first");
+    let now = now_ms();
+    let queued: Vec<_> = (1..=2000).map(|id| json!({"id":id,"title":"Existing notice","text":"Existing text","targets":["garden-second"],"createdAt":iso(now),"expiresAt":iso(now+86400000)})).collect();
+    let conn = Connection::open(dir.path().join("data.sqlite")).unwrap();
+    conn.execute(
+        "INSERT INTO legacy_documents(name,content) VALUES('announcements.json',?1)",
+        [serde_json::to_vec(&json!({"nextId":2001,"announcements":queued})).unwrap()],
+    )
+    .unwrap();
+    let mut e = seedbed_entry();
+    advance(&s, &mut e, "queue-full");
+    assert_eq!(
+        s.get("garden-first").unwrap().unwrap()["reportRevision"],
+        "queue-full"
+    );
+    assert_eq!(
+        s.seedbed_story_status().unwrap()["progressCounts"],
+        json!([0, 0, 0, 0, 0, 0])
+    );
+    s.revoke_announcement(1).unwrap();
+    advance(&s, &mut e, "space-available");
+    let sent = notices(&s);
+    assert_eq!(sent.len(), 2000);
+    assert_eq!(sent.last().unwrap()["id"], 2001);
+    assert_eq!(sent.last().unwrap()["targets"], json!(["garden-first"]));
+    assert_eq!(
+        s.seedbed_story_status().unwrap()["progressCounts"],
+        json!([1, 0, 0, 0, 0, 0])
+    );
+}

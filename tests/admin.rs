@@ -940,7 +940,11 @@ async fn forum_and_logo_controls_require_admin_and_support_immediate_schedule_an
 #[tokio::test]
 async fn story_configuration_is_private_authenticated_and_persistent() {
     let (_dir, store) = fixture();
-    for route in ["/api/admin/story", "/api/admin/story/granary"] {
+    for route in [
+        "/api/admin/story",
+        "/api/admin/story/granary",
+        "/api/admin/story/seedbed",
+    ] {
         let token = store.admin_token(false).unwrap();
         let readonly = private(application(store.clone(), false));
         assert_eq!(

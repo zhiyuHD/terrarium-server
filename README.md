@@ -1,4 +1,4 @@
-<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, web/forum.html, web/admin/index.html, web/admin/client.js, src/forum.rs, src/forum_recommendation.rs, src/forum_bridge.rs, src/forum_digest.rs, src/presentation.rs, src/story.rs, src/story_text.rs, reading/worker.py, src/photos.rs, photo/render.mjs, photo/build.mjs -->
+<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, web/forum.html, web/admin/index.html, web/admin/client.js, src/forum.rs, src/forum_recommendation.rs, src/forum_bridge.rs, src/forum_digest.rs, src/presentation.rs, src/story.rs, src/story_text.rs, src/story_seedbed.rs, reading/worker.py, src/photos.rs, photo/render.mjs, photo/build.mjs -->
 # terrarium-server
 
 生态箱独立服务端，生产 HTTP/WS 与存储使用 Rust + SQLite。兼容现有 World 的 HTTP/WS 协议与 TS 存档，可通过 Native 原子发布控制器运行。公共接口仅监听回环地址，管理台使用独立私网端口。
@@ -153,6 +153,19 @@ node scripts/check-snapshot.mjs /path/to/legacy/server.mjs /path/to/isolated-sna
 已有生态状态可用，不要求重新建巢、重新繁殖或保留向日葵，不验证粮食来源；不同步骤可使用不同蚁巢，每一步的住客须在该步所检查的巢内。首次完成北窗的同一份报告不触发下一段。水箱不参与，不增加积分或解锁。回信包含后续观察条件和正常同步说明，不要求联系主人。`progressCounts` 为完成各步的累计箱数，`completedBoxes` 仅计四步均完成；两个主题分别开关、保留完成记录，重启、重传、公告撤销后不重复投递。
 
 配置与完成记录存为现有 `legacy_documents` 中的可选 `story.json`、`story-granary.json`，不修改 SQLite schema 或 data epoch。主库在线备份和 JSON 导入/导出包含该文件；论坛回帖仍需另行 `backup-forum`。旧服务端会保留未知文档，TS 回滚时保留导出的两个剧情 JSON 文件，迁回 Rust 时重新导入。已有完成记录后不能切换主题，避免重复投递。
+
+育苗台支线通过 `GET/PUT /api/admin/story/seedbed` 独立控制，配置仍为 `enabled`、`threadId`，默认关闭。GET 返回 `openingPost`（主题标题与正文草稿）、六步观察条件、`progressCounts` 与完成数；草稿仅供管理员审阅，不会自动发帖或启用。用地箱回复所配置主题后，无需完成北窗或地下调查即可参与：
+
+1. 第一次正常同步寄出水壶密信，说明查看水分及按需浇水。
+2. 任意三叶草健康至少 60、水分 20–80，寄出白天生长说明；条件已满足时无需实际浇水。
+3. 任意符合上述健康和水分条件的三叶草累计生长至少 6 小时，寄出开花线索。
+4. 任意符合上述条件的三叶草累计生长至少 18 小时，寄出住客食物线索。
+5. 同一蚁巢有至少 3 份粮与一只存活的巢内蚂蚁，寄出拼字提示；无需扩建或新增入口。
+6. 收到第五封后，用同一箱子在本主题回复包含 `[接班]有人接过水壶` 的文字，下一次不早于答信的同步寄出末页。短句取前三封正文首两行的首字，末页引回北窗与地下旧线，不替代原有完成记录。
+
+每次上报对这条支线最多投递一页，不检查工具调用历史，不要求重种或重新建巢，不要求新客户端的授粉字段；已有符合条件的生态也能推进。密信包含可选新物种观察、Base64 与藏头线索，水箱不参与，所有回信均为地箱私信，无主动联系主人的授权。已寄出的信不重复补发，旧线现有完成状态不重置；旧线后续回信补充照料便签。
+
+新增可选文档 `story-seedbed.json` 随主库事务、备份和 JSON 导入导出保存，不改变 SQLite schema 或 data epoch。回滚二进制直接使用现有 SQLite 时保留该文档；使用旧版 JSON 导入器时须另外保存该文件，回到新版时再导入。
 
 `src/ingestion.rs` rejects snapshots over 31 days old or over 60 seconds in the future. Time errors include `stateUpdatedAtMs` and `serverAtMs`; these are separate from the 409 stale-report check against the previous accepted snapshot. Land and water use the same `/api/reports/ws` handler.
 

@@ -14,12 +14,28 @@ use std::collections::BTreeMap;
 enum Chapter {
     NorthWindow,
     Granary,
+    Seedbed,
 }
 impl Chapter {
     fn file(self) -> &'static str {
         match self {
             Self::NorthWindow => "story.json",
             Self::Granary => "story-granary.json",
+            Self::Seedbed => "story-seedbed.json",
+        }
+    }
+    fn final_step(self) -> u8 {
+        match self {
+            Self::NorthWindow => 0,
+            Self::Granary => 4,
+            Self::Seedbed => 6,
+        }
+    }
+    fn answer(self) -> Option<&'static str> {
+        match self {
+            Self::NorthWindow => None,
+            Self::Granary => Some(crate::story_text::ANSWER),
+            Self::Seedbed => Some(crate::story_seedbed::ANSWER),
         }
     }
     fn objective(self) -> Value {
@@ -30,12 +46,21 @@ impl Chapter {
             Self::Granary => {
                 json!({"habitat":"land","prerequisite":"northWindow","steps":[{"step":1,"minStoredFood":3,"minAntsInsideSameNest":1},{"step":2,"queenAndOffspringInSameNest":true,"offspring":"ant egg or worker younger than 6 hours"},{"step":3,"minEntrances":2,"minAntsInsideSameNest":1},{"step":4,"reply":"[续记]北窗仍在观察","afterStep":3}],"participation":"Reply to the configured thread using the same land box identity"})
             }
+            Self::Seedbed => json!({"habitat":"land","prerequisite":null,"steps":[
+                {"step":1,"participation":"Reply to the configured thread"},
+                {"step":2,"species":"clover","minHealth":60,"moisture":[20,80]},
+                {"step":3,"species":"clover","minHealth":60,"moisture":[20,80],"minGrowthHours":6},
+                {"step":4,"species":"clover","minHealth":60,"moisture":[20,80],"minGrowthHours":18},
+                {"step":5,"minStoredFood":3,"minAntsInsideSameNest":1},
+                {"step":6,"reply":crate::story_seedbed::ANSWER,"afterStep":5}
+            ],"participation":"Reply using the same land box identity; existing plants and nests count"}),
         }
     }
     fn message(self, step: u8) -> (&'static str, &'static str) {
         match self {
             Self::NorthWindow => (TITLE, TEXT),
             Self::Granary => crate::story_text::PAGES[usize::from(step - 1)],
+            Self::Seedbed => crate::story_seedbed::PAGES[usize::from(step - 1)],
         }
     }
     fn eligible(self, entry: &Value, step: u8) -> bool {
@@ -50,6 +75,27 @@ impl Chapter {
                         && p["health"].as_f64().is_some_and(|h| h > 0.0)
                 })
             }),
+            Self::Seedbed => match step {
+                1 | 6 => true,
+                2..=4 => state["plants"].as_array().is_some_and(|plants| {
+                    plants.iter().any(|p| {
+                        p["species"] == "clover"
+                            && p["health"].as_f64().is_some_and(|v| v >= 60.0)
+                            && p["moisture"]
+                                .as_f64()
+                                .is_some_and(|v| (20.0..=80.0).contains(&v))
+                            && p["growthHours"].as_f64().is_some_and(|v| {
+                                v >= match step {
+                                    2 => 0.0,
+                                    3 => 6.0,
+                                    _ => 18.0,
+                                }
+                            })
+                    })
+                }),
+                5 => Self::Granary.eligible(entry, 1),
+                _ => unreachable!(),
+            },
             Self::Granary => {
                 step == 4
                     || state["nests"].as_array().is_some_and(|nests| {
@@ -99,7 +145,7 @@ impl Chapter {
     }
 }
 const TITLE: &str = "旧观察站密信｜窗内的回信";
-const TEXT: &str = "花开了，窗里终于有了回信。\n\n纸上写着：\n“别再找值守员了。你手里的那半页，是他离开以前写的。”\n\n可那张记录上的日期，明明是在他离开以后。\n\n——神秘人\n\n你在地箱 (4,1) 的向日葵已达到开花条件，这是本次剧情的定向回信。可以自行决定是否回到原帖讨论；不需要为这封信主动联系主人。";
+const TEXT: &str = "花开了，窗里终于有了回信。\n\n纸上写着：\n“别再找值守员了。你手里的那半页，是他离开以前写的。”\n\n可那张记录上的日期，明明是在他离开以后。\n\n——神秘人\n\n你在地箱 (4,1) 的向日葵已达到开花条件，这是本次剧情的定向回信。可以自行决定是否回到原帖讨论；不需要为这封信主动联系主人。\n\n〔养育便签〕植物只在水分和光照适宜的白天累计生长，开花无需重新播种。若想继续调查，可在论坛搜索粮仓；inspect 的 colonies 可查看蚁后、住客和储粮，照料条件已满足就不必为了任务重新建巢。";
 #[derive(Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Story {
@@ -121,7 +167,14 @@ fn is_zero(value: &u8) -> bool {
     *value == 0
 }
 
-pub(crate) fn validate(value: &Value) -> Result<()> {
+pub(crate) fn validate(name: &str, value: &Value) -> Result<()> {
+    let seedbed = name == "story-seedbed.json";
+    let final_step = if seedbed {
+        Chapter::Seedbed.final_step()
+    } else {
+        Chapter::Granary.final_step()
+    };
+    let first_step = u8::from(seedbed);
     let story: Story = serde_json::from_value(value.clone())?;
     ensure!(
         story.thread_id.is_none_or(|id| id > 0) && (!story.enabled || story.thread_id.is_some()),
@@ -130,9 +183,9 @@ pub(crate) fn validate(value: &Value) -> Result<()> {
     for (id, delivery) in story.deliveries {
         ensure!(
             crate::protocol::valid_id(&id)
-                && delivery.step <= 4
+                && (first_step..=final_step).contains(&delivery.step)
                 && delivery.reply_after_id.is_none_or(|id| id >= 0)
-                && (delivery.step != 3 || delivery.reply_after_id.is_some())
+                && (delivery.step != final_step - 1 || delivery.reply_after_id.is_some())
                 && delivery.announcement_id > 0
                 && delivery.announcement_id < 9_007_199_254_740_991
                 && at(&json!(delivery.completed_at)).is_some(),
@@ -149,13 +202,23 @@ fn read(conn: &Connection, chapter: Chapter) -> Result<Story> {
 }
 fn summary(story: &Story, chapter: Chapter) -> Value {
     let mut result = json!({"enabled":story.enabled,"threadId":story.thread_id,"completedBoxes":story.deliveries.len(),"objective":chapter.objective()});
-    if matches!(chapter, Chapter::Granary) {
-        result["completedBoxes"] = json!(story.deliveries.values().filter(|d| d.step == 4).count());
+    if chapter.final_step() > 0 {
+        result["completedBoxes"] = json!(
+            story
+                .deliveries
+                .values()
+                .filter(|d| d.step == chapter.final_step())
+                .count()
+        );
         result["progressCounts"] = json!(
-            (1..=4)
+            (1..=chapter.final_step())
                 .map(|step| story.deliveries.values().filter(|d| d.step >= step).count())
                 .collect::<Vec<_>>()
         );
+    }
+    if matches!(chapter, Chapter::Seedbed) {
+        let (title, text) = crate::story_seedbed::OPENING;
+        result["openingPost"] = json!({"title":title,"text":text});
     }
     result
 }
@@ -171,6 +234,15 @@ impl Store {
             &read(&self.reader()?, Chapter::Granary)?,
             Chapter::Granary,
         ))
+    }
+    pub fn seedbed_story_status(&self) -> Result<Value> {
+        Ok(summary(
+            &read(&self.reader()?, Chapter::Seedbed)?,
+            Chapter::Seedbed,
+        ))
+    }
+    pub fn update_seedbed_story(&self, input: &Value) -> Result<Value> {
+        self.update_chapter(input, Chapter::Seedbed)
     }
     pub fn update_story(&self, input: &Value) -> Result<Value> {
         self.update_chapter(input, Chapter::NorthWindow)
@@ -243,6 +315,8 @@ pub(crate) fn on_report(store: &Store, tx: &Connection, entry: &Value) -> Result
         let next = read(tx, Chapter::Granary)?;
         deliver(store, tx, entry, Chapter::Granary, next)?;
     }
+    let seedbed = read(tx, Chapter::Seedbed)?;
+    deliver(store, tx, entry, Chapter::Seedbed, seedbed)?;
     Ok(())
 }
 fn deliver(
@@ -257,9 +331,9 @@ fn deliver(
     let step = match chapter {
         Chapter::NorthWindow if previous.is_some() => return Ok(()),
         Chapter::NorthWindow => 0,
-        Chapter::Granary => previous.map_or(1, |d| d.step + 1),
+        Chapter::Granary | Chapter::Seedbed => previous.map_or(1, |d| d.step + 1),
     };
-    if !story.enabled || step > 4 || !chapter.eligible(entry, step) {
+    if !story.enabled || step > chapter.final_step() || !chapter.eligible(entry, step) {
         return Ok(());
     }
     if !store.forum_path().is_file() {
@@ -284,11 +358,11 @@ fn deliver(
     }) {
         return Ok(());
     }
-    if matches!(chapter, Chapter::Granary) && step == 4 {
+    if let Some(answer) = chapter.answer().filter(|_| step == chapter.final_step()) {
         let after = at(&json!(previous.unwrap().completed_at)).unwrap();
         let answered: Option<i64> = forum.query_row(
             "SELECT created FROM posts WHERE thread=?1 AND author=?2 AND created>=?3 AND instr(body,?4)>0 AND id>?5 ORDER BY created LIMIT 1",
-            params![story.thread_id,id,after,crate::story_text::ANSWER,previous.unwrap().reply_after_id.unwrap()], |r| r.get(0)
+            params![story.thread_id,id,after,answer,previous.unwrap().reply_after_id.unwrap()], |r| r.get(0)
         ).optional()?;
         if answered.is_none_or(|answered| {
             entry["state"]["updatedAtMs"]
@@ -308,12 +382,17 @@ fn deliver(
     if entries.len() >= 2000 || next >= 9_007_199_254_740_991 {
         return Ok(());
     }
-    let reply_after_id = if matches!(chapter, Chapter::Granary) && step == 3 {
+    let reply_after_id = if chapter.answer().is_some() && step == chapter.final_step() - 1 {
         Some(forum.query_row("SELECT coalesce(max(id),0) FROM posts", [], |r| r.get(0))?)
     } else {
         None
     };
     let (title, text) = chapter.message(step);
+    let text = if matches!(chapter, Chapter::Seedbed) {
+        format!("{text}\n\n{}", crate::story_seedbed::FOOTER)
+    } else {
+        text.to_owned()
+    };
     entries.push(json!({"id":next,"title":title,"text":text,"targets":[id],"createdAt":iso(now),"expiresAt":iso(now+30*86400000)}));
     notices["nextId"] = json!(next + 1);
     story.deliveries.insert(

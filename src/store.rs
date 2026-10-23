@@ -19,6 +19,7 @@ const DOCUMENTS: &[&str] = &[
     "protocol-notices.json",
     "story.json",
     "story-granary.json",
+    "story-seedbed.json",
     "admin-token",
 ];
 #[derive(Clone)]
