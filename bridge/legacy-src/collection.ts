@@ -34,7 +34,12 @@ export function restoreCollected(state: TerrariumState | AquariumState, id: stri
       if (state.plants.length >= capacity(state).organisms || state.plants.some(p => p.x === x && p.y === y)) throw new Error('Aquatic capacity or plot occupied: select a cell without aquatic plants; the specimen remains in collection'); state.plants.push(specimen as AquaticPlantState);
     } else throw new Error('Collection habitat mismatch');
   } else if (entry.kind === 'bug') {
-    if ((specimen as BugState).species === 'ant' && surfaceAntOccupied(state, x, y)) throw new Error('That surface cell already has an ant; the specimen remains in collection');
+    if ((specimen as BugState).species === 'ant' && surfaceAntOccupied(state, x, y)) {
+      const size = capacity(state).size;
+      const free = Array.from({ length: size * size }, (_, i) => ({ x: i % size, y: Math.floor(i / size) })).filter(p => !surfaceAntOccupied(state, p.x, p.y)).sort((a, b) => Math.abs(a.x-x)+Math.abs(a.y-y)-Math.abs(b.x-x)-Math.abs(b.y-y))[0];
+      if (!free) throw new Error('No free surface cell for this ant');
+      Object.assign(specimen, free);
+    }
     if (state.bugs.length + (state.eggs?.length ?? 0) >= capacity(state).organisms) throw new Error('Bug capacity reached'); state.bugs.push(specimen as BugState);
   } else if (entry.kind === 'plant' || entry.kind === 'seed') {
     if (state.plants.length + state.seeds.length >= capacity(state).organisms || isNestEntrance(state, x, y) || [...state.plants, ...state.seeds].some(p => p.x === x && p.y === y)) throw new Error('Plant capacity or plot occupied: select a cell without a plant or seed; the specimen remains in collection');

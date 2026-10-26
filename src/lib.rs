@@ -32,3 +32,5 @@ pub mod photos;
 
 pub mod photo_cache;
 mod photo_notices;
+
+pub mod neighbors;

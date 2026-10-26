@@ -6,8 +6,11 @@ use crate::{
     store::{Store, random_hex},
 };
 use serde_json::{Value, json};
-use std::sync::Arc;
 use std::sync::LazyLock;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 use tokio::sync::Semaphore;
 pub static REPORT_BUFFERS: LazyLock<Arc<Semaphore>> =
     LazyLock::new(|| Arc::new(Semaphore::new(24 * 1024 * 1024)));
@@ -18,6 +21,13 @@ pub struct Ingestion {
     validator: LegacyValidator,
     pending: Arc<Semaphore>,
     metrics: Arc<crate::metrics::Metrics>,
+    gates: Arc<Mutex<HashMap<String, CachedGate>>>,
+}
+struct CachedGate {
+    version: Value,
+    transport: String,
+    expires_at: i64,
+    gate: Gate,
 }
 #[derive(Debug)]
 pub struct ReportError {
@@ -70,6 +80,7 @@ impl Ingestion {
             validator: LegacyValidator::default(),
             pending: Arc::new(Semaphore::new(4)),
             metrics: Arc::new(crate::metrics::Metrics::default()),
+            gates: Arc::new(Mutex::new(HashMap::new())),
         }
     }
     pub async fn ready(&self) -> anyhow::Result<()> {
@@ -87,8 +98,37 @@ impl Ingestion {
         let id = id.to_owned();
         let version = version.clone();
         let transport = transport.to_owned();
+        let gates = self.gates.clone();
         database(self.store.clone(), move |s| {
-            s.gate(&id, &version, &transport, now_ms())
+            let now = now_ms();
+            let controls = s.controls(now)?;
+            if let Some(cached) = gates.lock().unwrap().get(&id)
+                && cached.expires_at > now
+                && cached.version == version
+                && cached.transport == transport
+                && cached.gate.controls == controls
+            {
+                return Ok(cached.gate.clone());
+            }
+            let gate = s.gate(&id, &version, &transport, now)?;
+            if valid_version(&version) {
+                let mut cache = gates.lock().unwrap();
+                if cache.len() >= 16384 {
+                    cache.retain(|_, cached| cached.expires_at > now);
+                }
+                if cache.len() < 16384 {
+                    cache.insert(
+                        id,
+                        CachedGate {
+                            version,
+                            transport,
+                            expires_at: now + 60_000,
+                            gate: gate.clone(),
+                        },
+                    );
+                }
+            }
+            Ok(gate)
         })
         .await
     }
@@ -122,10 +162,13 @@ impl Ingestion {
         input: &Value,
         transport: &str,
     ) -> Result<Value, ReportError> {
-        let _permit = self
-            .pending
-            .try_acquire()
-            .map_err(|_| ReportError::new(503, "Too many pending reports"))?;
+        let _permit =
+            tokio::time::timeout(std::time::Duration::from_secs(2), self.pending.acquire())
+                .await
+                .map_err(|_| {
+                    ReportError::new(503, "Report processing is busy; retry after a short delay")
+                })?
+                .map_err(|_| ReportError::new(503, "Report processing stopped"))?;
         self.enforce(id, &input["clientVersion"], transport).await?;
         for key in ["clientVersion", "coopanionVersion"] {
             if input.get(key).is_some_and(|v| !valid_version(v)) {

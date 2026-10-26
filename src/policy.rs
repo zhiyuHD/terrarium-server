@@ -4,10 +4,11 @@ use crate::{
 };
 use anyhow::{Context, Result, ensure};
 use chrono::{DateTime, SecondsFormat};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Gate {
     pub controls: Value,
     pub notice: Option<Value>,
@@ -156,6 +157,7 @@ pub(crate) fn validate_document(name: &str, value: &Value) -> Result<()> {
                 );
             }
         }
+        "neighbors.json" => crate::neighbors::validate(value)?,
         "protocol-notices.json" => {
             for client in value
                 .as_object()
@@ -292,6 +294,21 @@ fn notice_content(
         scheduled_policy(controls),
     ))
 }
+pub(crate) fn protocol_client(conn: &Connection, id: &str) -> Result<Option<Value>> {
+    let path = format!("$.{}", serde_json::to_string(id)?);
+    let text: Option<String> = conn.query_row(
+        "SELECT json_extract(CAST(content AS TEXT),?1) FROM legacy_documents WHERE name='protocol-notices.json'",
+        [&path], |row| row.get(0),
+    ).optional()?.flatten();
+    text.map(|text| serde_json::from_str(&text).map_err(Into::into))
+        .transpose()
+}
+fn save_protocol_client(conn: &Connection, id: &str, client: &Value) -> Result<()> {
+    let path = format!("$.{}", serde_json::to_string(id)?);
+    conn.execute("INSERT INTO legacy_documents(name,content) VALUES('protocol-notices.json',CAST(json_set('{}',?1,json(?2)) AS BLOB)) ON CONFLICT(name) DO UPDATE SET content=CAST(json_set(CAST(content AS TEXT),?1,json(?2)) AS BLOB)", params![path,client.to_string()])?;
+    Ok(())
+}
+
 impl Store {
     pub fn controls(&self, now: i64) -> Result<Value> {
         Ok(effective_controls(
@@ -305,6 +322,24 @@ impl Store {
                 effective_controls(document(tx, "controls.json")?.unwrap_or(Value::Null), now);
             let obsolete = !meets_minimum(version, &controls["minimumClientVersion"]["version"]);
             let ignored_http = transport == "http" && controls["httpPush"]["enabled"] == false;
+            if notice_content(&controls, version, transport, obsolete, ignored_http).is_none() {
+                let original = protocol_client(tx, id)?.unwrap_or_else(|| json!({}));
+                let mut client = original.clone();
+                client["transport"] = json!(transport);
+                if valid_version(version) {
+                    client["version"] = version.clone();
+                } else {
+                    client.as_object_mut().unwrap().remove("version");
+                }
+                if client != original {
+                    save_protocol_client(tx, id, &client)?;
+                }
+                return Ok(Gate {
+                    controls,
+                    notice: None,
+                    rejection: None,
+                });
+            }
             let original = document(tx, "protocol-notices.json")?.unwrap_or_else(|| json!({}));
             let mut clients = original.clone();
             let client = clients
@@ -408,7 +443,9 @@ impl Store {
             visible.push(notice);
         }
         if let Some(id) = id {
-            let clients = document(&conn, "protocol-notices.json")?.unwrap_or_else(|| json!({}));
+            let client = protocol_client(&conn, id)?.unwrap_or_else(|| json!({}));
+            let digest = protocol_client(&conn, "@forum-digest")?.unwrap_or_else(|| json!({}));
+            let clients = json!({id:client,"@forum-digest":digest});
             visible.extend(crate::forum_bridge::notices(
                 &conn, &clients, id, after, now,
             )?);
@@ -431,10 +468,8 @@ impl Store {
     }
     pub fn observed_client(&self, id: &str) -> Result<Value> {
         let conn = self.reader()?;
-        if let Some(doc) = document(&conn, "protocol-notices.json")?
-            && let Some(client) = doc.get(id)
-        {
-            return Ok(client.clone());
+        if let Some(client) = protocol_client(&conn, id)? {
+            return Ok(client);
         }
         let entry = self.get(id)?;
         Ok(

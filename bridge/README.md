@@ -16,3 +16,5 @@ This fallback must remain until Rust validation covers all optional fields, coll
 0.8.10 第三阶段接受 daisy、lavender、bee、butterfly、花粉、授粉次数与 flower_seed，以及可选水箱 eggs、鱼 juvenile 和 lastSpawnAgeHours。卵和鱼共用容量，缺少这些字段的旧存档继续有效；不在服务端执行繁殖，无存储迁移。
 
 地箱可选 `economy` 保存累计收入、支出、花盆库存及格子摆放。校验整数余额、库存成本与支出一致、型号、格子唯一性及总数 64 上限；`naturalGrowthHours` 校验 0–48 且不超过生长小时。旧状态缺失这些字段仍有效；校验不替客户端模拟交易，不注入字段，保留原校验和。
+
+The bundled validation snapshot includes the 0.9.0 optional crop, litter, ant-policy and neighbor-receipt fields and new land/water species. Older state versions still use the same migration path.

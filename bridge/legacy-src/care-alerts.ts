@@ -10,6 +10,11 @@ export function validCareAlerts(value: unknown): boolean {
 
 /** Persisted levels suppress unchanged warnings across polling and restarts. */
 export function careAlerts(state: TerrariumState | AquariumState): string[] {
+  return careAlertChanges(state).map(change => change.text);
+}
+
+export interface CareAlertChange { condition: string; text: string }
+export function careAlertChanges(state: TerrariumState | AquariumState): CareAlertChange[] {
   const previous = state.careAlerts ?? {}, current: NonNullable<CareAlertState['careAlerts']> = {};
   const living = new Set(['box', ...state.plants.map(p => p.id), ...('fish' in state ? state.fish : state.bugs).map(b => b.id)]);
   const add = (id: string, condition: string, severity: number, label: string): void => {
@@ -35,15 +40,15 @@ export function careAlerts(state: TerrariumState | AquariumState): string[] {
     add('box', 'oxygen', state.oxygen < 25 ? 2 : state.oxygen <= 40 || previous['box:oxygen'] && state.oxygen < 50 ? 1 : 0, `含氧 ${state.oxygen.toFixed(1)}，低于 25 损害鱼类健康`);
     add('box', 'cleanliness', state.cleanliness < 15 ? 2 : state.cleanliness < 30 ? 1 : 0, `水质 ${state.cleanliness.toFixed(1)}，低于 30 损害健康`);
   }
-  const result: string[] = [];
+  const result: CareAlertChange[] = [];
   for (const [key, value] of Object.entries(current)) {
     const prior = previous[key];
-    if (!prior || value.severity > prior.severity) result.push(`${prior ? '恶化' : '新增'}：${value.label}`);
+    if (!prior || value.severity > prior.severity) result.push({ condition: key.slice(key.lastIndexOf(':') + 1), text: `${prior ? '恶化' : '新增'}：${value.label}` });
   }
   const conditionNames: Record<string, string> = { dry: '缺水', wet: '过湿', health: '低健康', energy: '低能量', hunger: '饥饿', oxygen: '低含氧', cleanliness: '低水质' };
   for (const key of Object.keys(previous)) {
     const id = key.slice(0, key.lastIndexOf(':')), condition = key.slice(key.lastIndexOf(':') + 1);
-    if (!current[key] && living.has(id)) result.push(`恢复：${id === 'box' ? '整箱' : id} ${conditionNames[condition]}已解除`);
+    if (!current[key] && living.has(id)) result.push({ condition, text: `恢复：${id === 'box' ? '整箱' : id} ${conditionNames[condition]}已解除` });
   }
   state.careAlerts = current;
   return result;

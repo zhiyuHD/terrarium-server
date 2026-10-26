@@ -412,6 +412,25 @@ pub fn submit(
 }
 
 pub fn prepare_poll(store: &Store, id: &str, version: &Value, after: u64, now: i64) -> Result<()> {
+    {
+        let reader = store.reader()?;
+        let client = crate::policy::protocol_client(&reader, id)?.unwrap_or_else(|| json!({}));
+        let needs_cleanup = ["forumReplies", "photoReplies"].iter().any(|key| {
+            client[*key].as_array().is_some_and(|items| {
+                items.iter().any(|n| {
+                    n["id"].as_u64().unwrap_or(0) <= after
+                        || at(&n["expiresAt"]).is_none_or(|at| at <= now)
+                })
+            })
+        });
+        let main = version.as_str().unwrap_or("").split('-').next().unwrap();
+        let needs_help = (!valid_version(version) || !meets_minimum(&json!(main), &json!("0.8.7")))
+            && client["forumHelpSent"] != true
+            && store.controls(now)?["forum"]["enabled"] == true;
+        if !needs_cleanup && !needs_help {
+            return Ok(());
+        }
+    }
     store.transaction(|tx| {
         let mut all = clients(tx)?;
         let original = all.clone();

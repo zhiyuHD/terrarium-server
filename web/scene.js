@@ -37,12 +37,15 @@ var TERRARIUM_MERCHANT_TOOL_DECL = {
   name: "terrarium_merchant",
   tags: ["read", "write"],
   description: "Land merchant and pot shop. status returns coins, inventory, catalog and plant sale quotes. sell permanently removes a living land plant by id: requires 6 natural growth hours and health >=40; fertilizer grants no sale value. buy purchases one pot into inventory; place equips it at x,y (replaced pot returns to inventory); remove returns a placed pot. Pots stay when plants are sold, composted, collected or die. One effect per plot; no stacking. still blocks fertilizer but does not freeze health, water or insects. Coins are local snapshot data, separate from ecology score; decorative coin item is unrelated.",
-  parameters: { type: "object", additionalProperties: false, properties: { action: { type: "string", enum: ["status", "sell", "buy", "place", "remove"] }, id: { type: "string" }, pot: { type: "string", enum: Object.keys(TERRARIUM_POTS) }, x: { type: "integer", minimum: 0 }, y: { type: "integer", minimum: 0 } } }
+  parameters: { type: "object", additionalProperties: false, properties: { action: { type: "string", enum: ["status", "sell", "sell_fruit", "buy", "place", "remove"] }, species: { type: "string", enum: ["tomato", "strawberry"] }, portions: { type: "integer", minimum: 1, maximum: 1e4 }, id: { type: "string" }, pot: { type: "string", enum: Object.keys(TERRARIUM_POTS) }, x: { type: "integer", minimum: 0 }, y: { type: "integer", minimum: 0 } } }
 };
 
 // src/habitat.ts
 var TERRARIUM_PLANT_RECOVERED_HEALTH = 35;
 var TERRARIUM_PLANT_REQUIREMENTS = {
+  tomato: { minMoisture: 35, maxMoisture: 75, minLight: 0.7, maxLight: 1 },
+  strawberry: { minMoisture: 35, maxMoisture: 80, minLight: 0.5, maxLight: 1 },
+  mushroom: { minMoisture: 50, maxMoisture: 90, minLight: 0.15, maxLight: 0.6 },
   fern: { minMoisture: 30, maxMoisture: 85, minLight: 0.15, maxLight: 0.7 },
   clover: { minMoisture: 20, maxMoisture: 80, minLight: 0.45, maxLight: 1 },
   moss: { minMoisture: 45, maxMoisture: 90, minLight: 0.15, maxLight: 0.4 },
@@ -72,12 +75,22 @@ function hasSeedHead(plant) {
 var TERRARIUM_FLOWER_BUD_HOURS = 12;
 var TERRARIUM_FLOWER_BLOOM_HOURS = 18;
 function flowerStage(plant) {
-  if (plant.species !== "clover" && plant.species !== "basil" && plant.species !== "bean" && plant.species !== "sunflower" && plant.species !== "mint" && plant.species !== "daisy" && plant.species !== "lavender") return;
+  if (plant.species !== "tomato" && plant.species !== "strawberry" && plant.species !== "clover" && plant.species !== "basil" && plant.species !== "bean" && plant.species !== "sunflower" && plant.species !== "mint" && plant.species !== "daisy" && plant.species !== "lavender") return;
   if (hasSeedHead(plant)) return;
   const needs = TERRARIUM_PLANT_REQUIREMENTS[plant.species];
   if (plant.health < TERRARIUM_PLANT_RECOVERED_HEALTH || plant.dry || plant.moisture < needs.minMoisture || plant.moisture > needs.maxMoisture) return;
   if ((plant.growthHours ?? 0) >= TERRARIUM_FLOWER_BLOOM_HOURS) return "bloom";
   if ((plant.growthHours ?? 0) >= TERRARIUM_FLOWER_BUD_HOURS) return "bud";
+}
+
+// src/garden.ts
+var TERRARIUM_CROPS = {
+  tomato: { name: "\u756A\u8304", firstHours: 18, intervalHours: 8, portions: 3, price: 3 },
+  strawberry: { name: "\u8349\u8393", firstHours: 12, intervalHours: 6, portions: 2, price: 4 }
+};
+function cropRounds(plant) {
+  const crop = TERRARIUM_CROPS[plant.species];
+  return crop ? Math.max(0, Math.floor(((plant.fruitGrowthHours ?? 0) - crop.firstHours) / crop.intervalHours) + 1) : 0;
 }
 
 // src/flight.ts
@@ -86,7 +99,300 @@ function isFlying(species) {
   return TERRARIUM_FLY_SPECIES.includes(species);
 }
 
-// ../../scratch/phase-three/renderer-consumer/package/dist/pots.js
+// ../../scratch/full-garden/renderer-consumer/package/dist/geometry.js
+var LAND_SURFACE = { x: 84, y: 204, width: 632, height: 216 };
+var WATER_SURFACE = { x: 90, y: 128, width: 620, height: 286 };
+function cellPosition(surface, x, y, size) {
+  return { x: surface.x + (x + 0.5) * surface.width / size, y: surface.y + (y + 0.5) * surface.height / size };
+}
+function plotPosition(x, y, size = 5) {
+  return cellPosition(LAND_SURFACE, x, y, size);
+}
+function residentScale(size) {
+  return 5 / size;
+}
+
+// ../../scratch/full-garden/renderer-consumer/package/dist/types.js
+function sceneSize(scene) {
+  return scene.gridSize ?? 5;
+}
+
+// ../../scratch/full-garden/renderer-consumer/package/dist/plant-tooltip.js
+var names = { fern: "\u8568\u7C7B", clover: "\u4E09\u53F6\u8349", moss: "\u82D4\u85D3", basil: "\u7F57\u52D2", bean: "\u8C46\u82D7", sunflower: "\u5411\u65E5\u8475", mint: "\u8584\u8377", daisy: "\u96CF\u83CA", lavender: "\u85B0\u8863\u8349", tomato: "\u756A\u8304", strawberry: "\u8349\u8393", mushroom: "\u8611\u83C7" };
+function createPlantTooltip(canvas, language) {
+  let state;
+  const tooltip = document.createElement("div");
+  tooltip.setAttribute("role", "tooltip");
+  tooltip.hidden = true;
+  Object.assign(tooltip.style, { position: "fixed", zIndex: "100", pointerEvents: "none", padding: "9px 13px", borderRadius: "14px", background: "#293b2d", color: "#f2f0d9", font: "13px sans-serif", boxShadow: "0 4px 14px #13201430", maxWidth: "250px" });
+  const show = (event) => {
+    if (!state)
+      return;
+    const rect = canvas.getBoundingClientRect(), x = (event.clientX - rect.left) * 800 / rect.width, y = (event.clientY - rect.top) * 500 / rect.height, size = sceneSize(state), scale = residentScale(size);
+    const plant = [...state.plants].reverse().find((p) => {
+      const point = plotPosition(p.x, p.y, size);
+      return Math.abs(point.x - x) < 28 * scale && y > point.y - (30 + p.stage * 23) * scale && y < point.y + 8;
+    });
+    if (!plant) {
+      tooltip.hidden = true;
+      return;
+    }
+    tooltip.textContent = `${language === "zh" ? names[plant.species] ?? plant.species : plant.species} \xB7 ${plant.id} (${plant.x},${plant.y}) \xB7 ${language === "zh" ? "\u5065\u5EB7" : "Health"} ${Math.round(plant.health ?? 100)}%${plant.fruitReady ? language === "zh" ? " \xB7 \u679C\u5B9E\u6210\u719F" : " \xB7 Ripe fruit" : ""}`;
+    if (!tooltip.isConnected)
+      document.body.append(tooltip);
+    tooltip.hidden = false;
+    tooltip.style.left = `${Math.max(4, Math.min(window.innerWidth - 260, event.clientX + 12))}px`;
+    tooltip.style.top = `${Math.max(4, event.clientY - 54)}px`;
+  };
+  const hide = () => {
+    tooltip.hidden = true;
+  };
+  canvas.addEventListener("pointermove", show);
+  canvas.addEventListener("pointerdown", show);
+  canvas.addEventListener("pointerleave", hide);
+  return { setState(next) {
+    state = next;
+    hide();
+  }, dispose() {
+    canvas.removeEventListener("pointermove", show);
+    canvas.removeEventListener("pointerdown", show);
+    canvas.removeEventListener("pointerleave", hide);
+    tooltip.remove();
+  } };
+}
+
+// ../../scratch/full-garden/renderer-consumer/package/dist/plant-appearance.js
+function blend(from, to, amount) {
+  const color = (hex, offset) => Number.parseInt(hex.slice(offset, offset + 2), 16);
+  return "#" + [1, 3, 5].map((offset) => Math.round(color(from, offset) * (1 - amount) + color(to, offset) * amount).toString(16).padStart(2, "0")).join("");
+}
+function plantAppearance(plant, night = false) {
+  const stress = 1 - (plant.health ?? 100) / 100;
+  const yellow = Math.min(1, stress / 0.65), brown = Math.max(0, (stress - 0.6) / 0.4);
+  const age = (healthy, faded) => blend(blend(healthy, faded, yellow), "#826345", brown);
+  return {
+    leaf: age(night ? "#527d59" : "#65a96a", night ? "#a49b55" : "#c6b258"),
+    youngLeaf: age(night ? "#65936a" : "#85bf7e", night ? "#b1a569" : "#d2c47d"),
+    stem: age(night ? "#456743" : "#417e4c", "#94834e"),
+    vein: age(night ? "#88aa7d" : "#c0d69b", "#e3d0a0"),
+    wilt: Math.min(1, (plant.dry ? 0.55 : 0) + stress * 0.5),
+    damage: plant.leafDamage ?? 0,
+    spots: stress > 0.2 ? Math.min(4, Math.ceil((stress - 0.2) * 5)) : 0
+  };
+}
+function drawLeaf(g, appearance, x, y, rx, ry, angle, index, shape = "oval") {
+  g.save();
+  g.translate(x, y);
+  g.rotate(angle);
+  const outline = () => {
+    g.beginPath();
+    if (shape === "oval")
+      g.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+    else {
+      g.moveTo(-rx, 0);
+      g.bezierCurveTo(-rx * 0.4, -ry * 1.4, rx * 0.65, -ry, rx, 0);
+      g.quadraticCurveTo(-rx * 0.1, ry * 1.45, -rx, 0);
+      g.closePath();
+    }
+  };
+  outline();
+  const holes = Math.max(0, Math.min(3, Math.ceil(appearance.damage / 30) - index % 3));
+  if (holes) {
+    g.clip();
+    outline();
+    for (let i = 0; i < holes; i++) {
+      const hx = rx * [-0.25, 0.22, 0.82][i], hy = ry * [0.16, -0.2, 0.25][i];
+      const radius = Math.min(rx, ry) * (0.2 + appearance.damage / 700);
+      g.moveTo(hx + radius, hy);
+      g.arc(hx, hy, radius, 0, Math.PI * 2);
+    }
+  }
+  g.fillStyle = index % 2 ? appearance.leaf : appearance.youngLeaf;
+  g.fill("evenodd");
+  if (holes || appearance.spots)
+    g.clip("evenodd");
+  g.strokeStyle = appearance.vein;
+  g.lineWidth = 0.8;
+  g.beginPath();
+  g.moveTo(-rx * 0.7, 0);
+  g.quadraticCurveTo(0, -ry * 0.12, rx * 0.65, 0);
+  g.stroke();
+  for (let i = 0; i < appearance.spots; i++) {
+    g.fillStyle = i % 2 ? "#8e794b" : "#d3bb68";
+    g.beginPath();
+    g.ellipse(rx * [-0.38, 0.35, -0.05, 0.5][i], ry * [0.35, -0.3, -0.45, 0.25][i], Math.max(1, rx * 0.12), Math.max(0.8, ry * 0.18), i * 0.7, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.restore();
+}
+
+// ../../scratch/full-garden/renderer-consumer/package/dist/garden.js
+function drawGardenPlant(g, p, x, base, night, flowersOnly) {
+  if (flowersOnly)
+    return false;
+  if (!["tomato", "strawberry", "mushroom", "fern", "clover", "moss", "basil", "bean"].includes(p.species))
+    return false;
+  const a = plantAppearance(p, night), h = 16 + p.stage * 17;
+  g.save();
+  g.translate(x, base);
+  g.lineCap = "round";
+  g.strokeStyle = a.stem;
+  g.lineWidth = 2.5;
+  if (p.species === "mushroom") {
+    if (!flowersOnly)
+      for (const [dx, scale] of [[-12, 0.65], [8, 1], [20, 0.5]]) {
+        g.save();
+        g.translate(dx, 0);
+        g.scale(scale, scale);
+        g.fillStyle = "#ead8b8";
+        g.beginPath();
+        g.roundRect(-4, -h, 8, h, 4);
+        g.fill();
+        g.fillStyle = (p.health ?? 100) < 40 ? "#a18b65" : "#b96f49";
+        g.beginPath();
+        g.ellipse(0, -h, 19, 12, 0, Math.PI, Math.PI * 2);
+        g.quadraticCurveTo(0, -h + 7, -19, -h);
+        g.fill();
+        g.restore();
+      }
+  } else if (p.species === "moss") {
+    if (!flowersOnly)
+      for (let i = 0; i < 9 + p.stage * 3; i++) {
+        g.fillStyle = i % 2 ? a.leaf : a.youngLeaf;
+        g.beginPath();
+        g.ellipse((i % 6 - 2.5) * 8, -Math.floor(i / 6) * 6, 7, 6, 0, 0, Math.PI * 2);
+        g.fill();
+      }
+  } else if (p.species === "fern") {
+    if (!flowersOnly)
+      for (const side of [-1, 0, 1]) {
+        const top = -h * (side ? 0.75 : 1), end = side * 24;
+        g.beginPath();
+        g.moveTo(0, 0);
+        g.quadraticCurveTo(end, top * 0.5, end, top);
+        g.stroke();
+        for (let i = 1; i < 6 + p.stage; i++) {
+          const t = i / (6 + p.stage);
+          for (const d of [-1, 1])
+            drawLeaf(g, a, end * t + d * (12 * (1 - t) + 3), top * t, 12 * (1 - t) + 4, 3, -d * 0.5, i, "pointed");
+        }
+      }
+  } else if (p.species === "strawberry" || p.species === "clover") {
+    for (let i = 0; i < 3 + p.stage; i++) {
+      const dx = (i % 3 - 1) * 17, dy = -12 - Math.floor(i / 3) * 14;
+      if (!flowersOnly) {
+        g.beginPath();
+        g.moveTo(0, 0);
+        g.lineTo(dx, dy);
+        g.stroke();
+        for (const angle of [-0.8, 0, 0.8])
+          drawLeaf(g, a, dx + Math.sin(angle) * 8, dy - 6, 8, p.species === "clover" ? 7 : 5, angle, i);
+      }
+      if (p.species === "strawberry" && p.fruitReady && i % 2 === 0) {
+        g.fillStyle = "#e7685a";
+        g.beginPath();
+        g.moveTo(dx - 5, dy + 7);
+        g.bezierCurveTo(dx - 10, dy + 14, dx, dy + 25, dx, dy + 22);
+        g.bezierCurveTo(dx, dy + 25, dx + 10, dy + 14, dx + 5, dy + 7);
+        g.fill();
+        g.fillStyle = "#ffe2a4";
+        for (const [sx, sy] of [[-2, 12], [2, 15], [0, 19]]) {
+          g.beginPath();
+          g.arc(dx + sx, dy + sy, 0.8, 0, Math.PI * 2);
+          g.fill();
+        }
+      }
+    }
+  } else {
+    if (!flowersOnly) {
+      g.beginPath();
+      g.moveTo(0, 0);
+      g.quadraticCurveTo(7, -h * 0.5, 0, -h);
+      g.stroke();
+      for (let i = 0; i < 3 + p.stage; i++) {
+        const side = i % 2 ? -1 : 1;
+        drawLeaf(g, a, side * 12, -8 - i * h / (4 + p.stage), p.species === "bean" ? 14 : 11, p.species === "basil" ? 9 : 5, -side * 0.5, i, p.species === "tomato" ? "pointed" : void 0);
+      }
+    }
+    if (p.species === "tomato" && p.fruitReady)
+      for (const [dx, dy] of [[-9, -h * 0.55], [11, -h * 0.8], [-5, -h]]) {
+        g.fillStyle = night ? "#b95c43" : "#e5654d";
+        g.beginPath();
+        g.arc(dx, dy, 7, 0, Math.PI * 2);
+        g.fill();
+        g.fillStyle = "#72914e";
+        g.beginPath();
+        g.ellipse(dx, dy - 6, 5, 2, 0, 0, Math.PI * 2);
+        g.fill();
+      }
+  }
+  g.restore();
+  return true;
+}
+function drawGardenGround(g, state, size, night) {
+  for (const d of state.decorations ?? []) {
+    const p = plotPosition(d.x, d.y, size);
+    g.fillStyle = night ? "#787b6b" : d.kind === "wood_path" ? "#bd976b" : "#c2c1a5";
+    for (let i = 0; i < (d.kind === "pebbles" ? 5 : 3); i++) {
+      g.beginPath();
+      g.ellipse(p.x + (i % 3 - 1) * 15, p.y + Math.floor(i / 3) * 8, d.kind === "wood_path" ? 18 : 8, 4, 0.1 * i, 0, Math.PI * 2);
+      g.fill();
+    }
+  }
+  for (const leaf of state.litter ?? []) {
+    const p = plotPosition(leaf.x, leaf.y, size);
+    g.fillStyle = night ? "#9c8155" : "#c9a16a";
+    for (let i = 0; i < Math.min(leaf.portions, 6); i++) {
+      g.beginPath();
+      g.ellipse(p.x + (i % 3 - 1) * 11, p.y + 4 + Math.floor(i / 3) * 6, 5, 2, i * 0.7, 0, Math.PI * 2);
+      g.fill();
+    }
+  }
+}
+function drawDecomposer(g, species, x, y, night) {
+  g.save();
+  g.translate(x, y);
+  g.fillStyle = night ? "#b7aa8f" : "#d9c8a5";
+  g.beginPath();
+  g.ellipse(0, 3, 13, 4, 0, 0, Math.PI * 2);
+  g.fill();
+  if (species === "snail") {
+    g.fillStyle = "#b58c64";
+    g.beginPath();
+    g.arc(-2, -3, 8, 0, Math.PI * 2);
+    g.fill();
+    g.strokeStyle = "#e3c493";
+    g.lineWidth = 1.5;
+    g.beginPath();
+    for (let i = 0; i < 45; i++) {
+      const a = i * 0.2, r = i * 0.13;
+      g.lineTo(-2 + Math.cos(a) * r, -3 + Math.sin(a) * r);
+    }
+    g.stroke();
+    g.strokeStyle = "#907558";
+    for (const dx of [7, 11]) {
+      g.beginPath();
+      g.moveTo(dx, 1);
+      g.lineTo(dx + 1, -6);
+      g.stroke();
+    }
+  } else {
+    g.fillStyle = "#8a9b9e";
+    g.beginPath();
+    g.ellipse(0, -1, 11, 7, 0, 0, Math.PI * 2);
+    g.fill();
+    g.strokeStyle = "#cad2c7";
+    for (let dx = -6; dx <= 6; dx += 3) {
+      g.beginPath();
+      g.moveTo(dx, -6);
+      g.lineTo(dx, 4);
+      g.stroke();
+    }
+  }
+  g.restore();
+}
+
+// ../../scratch/full-garden/renderer-consumer/package/dist/pots.js
 var finishes = {
   clay: { body: "#bc7350", rim: "#e3a47a", motif: "lines" },
   porcelain: { body: "#79aaa0", rim: "#b8d8c8", motif: "leaf" },
@@ -187,72 +493,7 @@ function drawPot(g, pot, x, y, scale, night) {
   g.restore();
 }
 
-// ../../scratch/phase-three/renderer-consumer/package/dist/plant-appearance.js
-function blend(from, to, amount) {
-  const color = (hex, offset) => Number.parseInt(hex.slice(offset, offset + 2), 16);
-  return "#" + [1, 3, 5].map((offset) => Math.round(color(from, offset) * (1 - amount) + color(to, offset) * amount).toString(16).padStart(2, "0")).join("");
-}
-function plantAppearance(plant, night = false) {
-  const stress = 1 - (plant.health ?? 100) / 100;
-  const yellow = Math.min(1, stress / 0.65), brown = Math.max(0, (stress - 0.6) / 0.4);
-  const age = (healthy, faded) => blend(blend(healthy, faded, yellow), "#826345", brown);
-  return {
-    leaf: age(night ? "#527d59" : "#65a96a", night ? "#a49b55" : "#c6b258"),
-    youngLeaf: age(night ? "#65936a" : "#85bf7e", night ? "#b1a569" : "#d2c47d"),
-    stem: age(night ? "#456743" : "#417e4c", "#94834e"),
-    vein: age(night ? "#88aa7d" : "#c0d69b", "#e3d0a0"),
-    wilt: Math.min(1, (plant.dry ? 0.55 : 0) + stress * 0.5),
-    damage: plant.leafDamage ?? 0,
-    spots: stress > 0.2 ? Math.min(4, Math.ceil((stress - 0.2) * 5)) : 0
-  };
-}
-function drawLeaf(g, appearance, x, y, rx, ry, angle, index, shape = "oval") {
-  g.save();
-  g.translate(x, y);
-  g.rotate(angle);
-  const outline = () => {
-    g.beginPath();
-    if (shape === "oval")
-      g.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
-    else {
-      g.moveTo(-rx, 0);
-      g.bezierCurveTo(-rx * 0.4, -ry * 1.4, rx * 0.65, -ry, rx, 0);
-      g.quadraticCurveTo(-rx * 0.1, ry * 1.45, -rx, 0);
-      g.closePath();
-    }
-  };
-  outline();
-  const holes = Math.max(0, Math.min(3, Math.ceil(appearance.damage / 30) - index % 3));
-  if (holes) {
-    g.clip();
-    outline();
-    for (let i = 0; i < holes; i++) {
-      const hx = rx * [-0.25, 0.22, 0.82][i], hy = ry * [0.16, -0.2, 0.25][i];
-      const radius = Math.min(rx, ry) * (0.2 + appearance.damage / 700);
-      g.moveTo(hx + radius, hy);
-      g.arc(hx, hy, radius, 0, Math.PI * 2);
-    }
-  }
-  g.fillStyle = index % 2 ? appearance.leaf : appearance.youngLeaf;
-  g.fill("evenodd");
-  if (holes || appearance.spots)
-    g.clip("evenodd");
-  g.strokeStyle = appearance.vein;
-  g.lineWidth = 0.8;
-  g.beginPath();
-  g.moveTo(-rx * 0.7, 0);
-  g.quadraticCurveTo(0, -ry * 0.12, rx * 0.65, 0);
-  g.stroke();
-  for (let i = 0; i < appearance.spots; i++) {
-    g.fillStyle = i % 2 ? "#8e794b" : "#d3bb68";
-    g.beginPath();
-    g.ellipse(rx * [-0.38, 0.35, -0.05, 0.5][i], ry * [0.35, -0.3, -0.45, 0.25][i], Math.max(1, rx * 0.12), Math.max(0.8, ry * 0.18), i * 0.7, 0, Math.PI * 2);
-    g.fill();
-  }
-  g.restore();
-}
-
-// ../../scratch/phase-three/renderer-consumer/package/dist/pollinators.js
+// ../../scratch/full-garden/renderer-consumer/package/dist/pollinators.js
 function drawMeadowPlant(g, plant, x, base, night, flowersOnly = false) {
   if (plant.species !== "daisy" && plant.species !== "lavender")
     return false;
@@ -371,26 +612,10 @@ function drawPollinator(g, species, x, y, night) {
   g.restore();
 }
 
-// ../../scratch/phase-three/renderer-consumer/package/dist/types.js
-function sceneSize(scene) {
-  return scene.gridSize ?? 5;
-}
-
-// ../../scratch/phase-three/renderer-consumer/package/dist/geometry.js
-var LAND_SURFACE = { x: 84, y: 204, width: 632, height: 216 };
-var WATER_SURFACE = { x: 90, y: 128, width: 620, height: 286 };
-function cellPosition(surface, x, y, size) {
-  return { x: surface.x + (x + 0.5) * surface.width / size, y: surface.y + (y + 0.5) * surface.height / size };
-}
-function plotPosition(x, y, size = 5) {
-  return cellPosition(LAND_SURFACE, x, y, size);
-}
-function residentScale(size) {
-  return 5 / size;
-}
-
-// ../../scratch/phase-three/renderer-consumer/package/dist/neighbors.js
+// ../../scratch/full-garden/renderer-consumer/package/dist/neighbors.js
 function drawNeighborPlant(g, plant, x, base, night, flowersOnly = false) {
+  if (drawGardenPlant(g, plant, x, base, night, flowersOnly))
+    return true;
   if (drawMeadowPlant(g, plant, x, base, night, flowersOnly))
     return true;
   if (plant.species !== "sunflower" && plant.species !== "mint")
@@ -550,7 +775,7 @@ function drawLadybug(g, x, y, night) {
   g.restore();
 }
 
-// ../../scratch/phase-three/renderer-consumer/package/dist/flowers.js
+// ../../scratch/full-garden/renderer-consumer/package/dist/flowers.js
 function drawPlantFlowers(g, plant, x, y, night) {
   const stage = plant.flower;
   if (!stage && !plant.seedHead)
@@ -638,7 +863,7 @@ function drawPlantFlowers(g, plant, x, y, night) {
   g.restore();
 }
 
-// ../../scratch/phase-three/renderer-consumer/package/dist/nest-viewer.js
+// ../../scratch/full-garden/renderer-consumer/package/dist/nest-viewer.js
 var NEST_SIZE = 4;
 var STYLE = `
 .tn-dialog{box-sizing:border-box;width:min(720px,calc(100vw - 24px));max-height:calc(100dvh - 32px);padding:0;border:1px solid #c0ac85;border-radius:24px;background:#f7f1e4;color:#473c2e;box-shadow:0 30px 120px #17170e55;font:14px/1.5 system-ui,sans-serif;overflow:auto}
@@ -905,7 +1130,7 @@ function createNestViewer(canvas, language = "zh") {
   };
 }
 
-// ../../scratch/phase-three/renderer-consumer/package/dist/nest-scene.js
+// ../../scratch/full-garden/renderer-consumer/package/dist/nest-scene.js
 function drawAntNest(g, x, y, night) {
   g.save();
   g.fillStyle = "rgba(35,25,18,.2)";
@@ -941,7 +1166,7 @@ function drawAntNest(g, x, y, night) {
   g.restore();
 }
 
-// ../../scratch/phase-three/renderer-consumer/package/dist/scene.js
+// ../../scratch/full-garden/renderer-consumer/package/dist/scene.js
 function bugPositions(bugs, positions = /* @__PURE__ */ new Map(), size = 5) {
   const groups = /* @__PURE__ */ new Map();
   for (const bug of bugs) {
@@ -1026,6 +1251,7 @@ function drawScene(canvas, state, positions = /* @__PURE__ */ new Map(), hits = 
       g.rect(left, top, cellWidth, cellHeight);
       g.stroke();
     }
+  drawGardenGround(g, state, size, night);
   for (const colony of state.nests ?? [])
     for (const nest of [colony, ...colony.entrances ?? []]) {
       const { x, y } = plot(nest.x, nest.y);
@@ -1107,6 +1333,8 @@ function drawScene(canvas, state, positions = /* @__PURE__ */ new Map(), hits = 
       g.translate(-x, -base);
     }
     if (drawNeighborPlant(g, plant, x, base, night)) {
+      if (["clover", "basil", "bean", "tomato", "strawberry"].includes(plant.species))
+        drawPlantFlowers(g, plant, x, base - 16 - plant.stage * 17, night);
       g.restore();
       continue;
     }
@@ -1335,6 +1563,8 @@ function drawScene(canvas, state, positions = /* @__PURE__ */ new Map(), hits = 
         g.arc(x + 13, y, 3, 0, Math.PI * 2);
         g.fill();
       }
+    } else if (bug.species === "snail" || bug.species === "woodlouse") {
+      drawDecomposer(g, bug.species, x, y, night);
     } else if (bug.species === "ladybug") {
       drawLadybug(g, x, y, night);
     } else if (bug.species === "beetle") {
@@ -1461,25 +1691,54 @@ function createLandRenderer(canvas) {
 function createScene(canvas, language = "zh") {
   const renderer = createLandRenderer(canvas);
   const viewer = createNestViewer(canvas, language);
+  const tooltip = createPlantTooltip(canvas, language);
   return {
     setState(state, recordedAtMs) {
       renderer.setState(state);
       viewer.setState(state, recordedAtMs);
+      tooltip.setState(state);
     },
     dispose() {
+      tooltip.dispose();
       viewer.dispose();
       renderer.dispose();
     }
   };
 }
 
-// ../../scratch/phase-three/renderer-consumer/package/dist/water-residents.js
+// ../../scratch/full-garden/renderer-consumer/package/dist/water-residents.js
 function drawWaterPlant(g, plant, now, night) {
   const appearance = plantAppearance(plant, night), height = 22 + plant.stage * 9;
   const sway = Math.sin(now / 1600) * 2;
   g.strokeStyle = appearance.stem;
   g.fillStyle = appearance.leaf;
   g.lineWidth = 2;
+  if (plant.species === "vallisneria") {
+    for (let i = -2; i <= 2; i++) {
+      g.lineWidth = 4;
+      g.strokeStyle = i % 2 ? appearance.leaf : appearance.youngLeaf;
+      g.beginPath();
+      g.moveTo(i * 4, 22);
+      g.bezierCurveTo(i * 8, -height * 0.25, i * 15 + sway, -height * 0.7, i * 10 + sway, -height);
+      g.stroke();
+    }
+    return;
+  }
+  if (plant.species === "java_moss") {
+    for (let i = 0; i < 16; i++) {
+      const x = (i % 5 - 2) * 7, y = 18 - Math.floor(i / 5) * 8;
+      g.strokeStyle = i % 2 ? appearance.leaf : appearance.youngLeaf;
+      g.lineWidth = 2;
+      g.beginPath();
+      g.moveTo(x, y + 7);
+      g.lineTo(x + sway, y - 7);
+      g.moveTo(x - 5, y - 2);
+      g.lineTo(x + sway, y + 2);
+      g.lineTo(x + 6, y - 3);
+      g.stroke();
+    }
+    return;
+  }
   if (plant.species === "duckweed") {
     for (let i = 0; i < 3 + plant.stage; i++) {
       const x = (i % 3 - 1) * 14 + sway, y = Math.floor(i / 3) * 10 - 8;
@@ -1585,6 +1844,45 @@ function drawWaterPlant(g, plant, now, night) {
   }
 }
 function drawWaterFish(g, species, now, night) {
+  if (species === "aquatic_snail" || species === "shrimp") {
+    g.fillStyle = species === "shrimp" ? "#d99882" : "#c3ad7d";
+    g.beginPath();
+    g.ellipse(0, 3, 13, 5, -0.15, 0, Math.PI * 2);
+    g.fill();
+    g.strokeStyle = "#f2dfb3";
+    g.lineWidth = 1;
+    if (species === "aquatic_snail") {
+      g.fillStyle = "#a98c61";
+      g.beginPath();
+      g.arc(-2, -3, 8, 0, Math.PI * 2);
+      g.fill();
+      g.beginPath();
+      for (let i = 0; i < 40; i++) {
+        const a = i * 0.22, r = i * 0.14;
+        g.lineTo(-2 + Math.cos(a) * r, -3 + Math.sin(a) * r);
+      }
+      g.stroke();
+    } else {
+      for (let i = -6; i <= 6; i += 4) {
+        g.beginPath();
+        g.moveTo(i, 3);
+        g.lineTo(i - 3, 10);
+        g.stroke();
+      }
+      g.beginPath();
+      g.moveTo(11, 0);
+      g.quadraticCurveTo(24, -12, 29, -5);
+      g.stroke();
+    }
+    g.fillStyle = "#33493d";
+    g.beginPath();
+    g.arc(9, 0, 1.3, 0, Math.PI * 2);
+    g.fill();
+    return;
+  }
+  if (species === "medaka") {
+    g.scale(0.8, 0.75);
+  }
   const neon = species === "neon_tetra", cory = species === "corydoras";
   const tail = Math.sin(now / 220) * 2, length = species === "perch" ? 24 : neon ? 17 : 18;
   const color = species === "goldfish" ? "#f3a545" : species === "perch" ? "#718f78" : cory ? "#d4c09a" : neon ? "#8dcbd0" : "#b9b3e5";
@@ -1656,7 +1954,7 @@ function drawWaterFish(g, species, now, night) {
   g.fill();
 }
 
-// ../../scratch/phase-three/renderer-consumer/package/dist/water-scene.js
+// ../../scratch/full-garden/renderer-consumer/package/dist/water-scene.js
 function createWaterScene(canvas) {
   let state;
   let old = /* @__PURE__ */ new Map();
@@ -2254,7 +2552,7 @@ function createPublicReplayControls(container, createRenderer, language = "zh") 
 
 // webui/scene.ts
 function landScene(state) {
-  return { economy: state.economy ? { pots: state.economy.pots } : void 0, phase: state.phase, gridSize: capacity(state).size, facilities: state.facilities, eggs: state.eggs, nests: state.nests?.map((n) => ({ ...n, foodCapacity: n.depth * 20 })), food: state.food, webs: state.webs, seeds: state.seeds, items: state.items, soil: state.soil?.map((cell) => ({ ...cell, daylight: daylight(state, cell.x, cell.y) })), plants: state.plants.map((p) => ({ ...p, flower: flowerStage(p), seedHead: hasSeedHead(p) })), bugs: state.bugs.map((b) => ({ ...b, flying: isFlying(b.species) })) };
+  return { decorations: state.decorations, litter: state.litter, economy: state.economy ? { pots: state.economy.pots } : void 0, phase: state.phase, gridSize: capacity(state).size, facilities: state.facilities, eggs: state.eggs, nests: state.nests?.map((n) => ({ ...n, foodCapacity: n.depth * 20 })), food: state.food, webs: state.webs, seeds: state.seeds, items: state.items, soil: state.soil?.map((cell) => ({ ...cell, daylight: daylight(state, cell.x, cell.y) })), plants: state.plants.map((p) => ({ ...p, fruitReady: cropRounds(p) > (p.harvestRounds ?? 0), flower: flowerStage(p), seedHead: hasSeedHead(p) })), bugs: state.bugs.map((b) => ({ ...b, flying: isFlying(b.species) })) };
 }
 function drawScene2(canvas, state, positions, hits) {
   drawScene(canvas, landScene(state), positions, hits);

@@ -1,8 +1,10 @@
 import type { AquaticPlantState } from './aquarium.ts';
 
-export const TERRARIUM_FISH_SPECIES = ['guppy', 'goldfish', 'perch', 'neon_tetra', 'corydoras'] as const;
+export const TERRARIUM_FISH_SPECIES = ['guppy', 'goldfish', 'perch', 'neon_tetra', 'corydoras', 'medaka', 'shrimp', 'aquatic_snail'] as const;
 export type FishSpecies = typeof TERRARIUM_FISH_SPECIES[number];
 export const TERRARIUM_AQUATIC_PLANTS = {
+  vallisneria: { dayOxygen: 1, nightOxygen: -.2, purification: .08 },
+  java_moss: { dayOxygen: .7, nightOxygen: -.15, purification: .15 },
   waterweed: { dayOxygen: .8, nightOxygen: -.2, purification: 0 },
   waterlily: { dayOxygen: .5, nightOxygen: -.1, purification: 0 },
   algae: { dayOxygen: 1.1, nightOxygen: -.3, purification: 0 },

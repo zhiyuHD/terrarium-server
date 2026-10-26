@@ -94,7 +94,7 @@ function actFish(state: AquariumState, fish: FishState, atMs: number, timezone: 
       return;
     }
   }
-  const targets = prey.length ? prey : state.food.length && (fish.species !== 'corydoras' || fish.energy < 85) ? state.food : (fish.species === 'goldfish' || fish.species === 'corydoras') && fish.energy < 70 ? state.plants.filter(plant => plant.species === 'algae' && plant.health > 30) : [];
+  const targets = prey.length ? prey : state.food.length && (fish.species !== 'corydoras' || fish.energy < 85) ? state.food : (['goldfish', 'corydoras', 'shrimp', 'aquatic_snail'].includes(fish.species)) && fish.energy < 70 ? state.plants.filter(plant => plant.species === 'algae' && plant.health > 30) : [];
   const target = [...targets].sort((a, b) => (fish.species === 'corydoras' && 'droppedAtMs' in a && 'droppedAtMs' in b ? a.droppedAtMs - b.droppedAtMs : 0) || Math.abs(a.x - fish.x) + Math.abs(a.y - fish.y) - Math.abs(b.x - fish.x) - Math.abs(b.y - fish.y) || a.id.localeCompare(b.id))[0];
   if (!target) {
     const direction = (Math.floor(atMs / TERRARIUM_FISH_ACTION_INTERVAL_MS) + Number(fish.id.split('-')[1])) % 4;
@@ -146,6 +146,7 @@ export function advanceAquarium(state: AquariumState, nowMs: number, timezone: s
     }
     for (const fish of [...state.fish]) {
       if (!state.fish.includes(fish)) continue;
+      if ((fish.species === 'shrimp' || fish.species === 'aquatic_snail') && state.cleanliness < 95) state.cleanliness = clamp(state.cleanliness + hours * .15);
       const energy = fish.energy; fish.energy = clamp(fish.energy - (state.oxygen >= 70 && state.cleanliness >= 70 && fish.energy < 70 ? 1 : 2) * hours); fish.ageHours += hours;
       if (state.oxygen < 25 || state.cleanliness < 30) fish.health = clamp(fish.health - 2 * hours);
       if (Math.floor(start / TERRARIUM_FISH_ACTION_INTERVAL_MS) !== Math.floor(end / TERRARIUM_FISH_ACTION_INTERVAL_MS)) actFish(state, fish, end, timezone, changes, damage);

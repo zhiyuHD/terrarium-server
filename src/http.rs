@@ -45,6 +45,7 @@ pub fn router(app: App) -> Router {
         )
         .route("/api/forum/status", get(crate::forum::status))
         .route("/api/forum/{*path}", any(crate::forum::handle))
+        .route("/api/neighbors", post(crate::neighbors::handle))
         .route("/api/photos", post(crate::photos::take))
         .route("/api/photos/{key}", get(crate::photos::download))
         .route("/health", get(health))

@@ -1,3 +1,4 @@
+import { validGarden, addLitter, actDecomposer, type GardenState } from './garden.ts';
 import { potAt, validEconomy, type Economy } from './merchant.ts';
 import { isPollinator, producesSeeds, visitFlower, TERRARIUM_POLLINATION, type Pollen } from './pollination.ts';
 import { clutchCapacity } from './fish-breeding.ts';
@@ -20,8 +21,8 @@ import { captureFrame, TERRARIUM_MAX_REPLAYS, TERRARIUM_REPLAY_RETENTION_MS, typ
 export type PlantId = string;
 export type ItemId = 'coin' | 'pebble';
 export type SeedSpecies = PlantSpecies;
-export type BugSpecies = 'aphid' | 'beetle' | 'ladybug' | 'spider' | 'ant' | FlyingSpecies;
-export interface PlantState { id: PlantId; species: PlantSpecies; x: number; y: number; moisture: number; growthHours: number; stage: number; dry: boolean; health: number; naturalGrowthHours?: number; healthWarning?: boolean; seedRounds?: number; leafDamage?: number; pollination?: number }
+export type BugSpecies = 'aphid' | 'beetle' | 'ladybug' | 'spider' | 'ant' | 'woodlouse' | 'snail' | FlyingSpecies;
+export interface PlantState { id: PlantId; species: PlantSpecies; x: number; y: number; moisture: number; growthHours: number; stage: number; dry: boolean; health: number; fruitGrowthHours?: number; harvestRounds?: number; naturalGrowthHours?: number; healthWarning?: boolean; seedRounds?: number; leafDamage?: number; pollination?: number }
 export interface SeedState { id: string; species: SeedSpecies; x: number; y: number; ageHours: number }
 export interface BugState { id: string; species: BugSpecies; x: number; y: number; ageHours: number; energy: number; hunger?: number; lastMeal?: { atMs: number; kind: 'foraging' }; carrying?: number; role?: 'queen' | 'worker'; inside?: NestPosition; pollen?: Pollen }
 export interface EggState { id: string; species: 'beetle' | 'ladybug' | 'spider' | 'ant' | FlyingSpecies; x: number; y: number; laidAtMs: number; hatchesAtMs: number; inside?: NestPosition }
@@ -29,7 +30,7 @@ export interface NestState { id: string; x: number; y: number; depth: number; fo
 export interface SpiderWeb { id: string; spiderId: string; x: number; y: number; createdAtMs: number }
 export interface LandFood { id: string; x: number; y: number; portions: number; droppedAtMs: number; kind?: 'sunflower_seed' | 'flower_seed' }
 export interface ItemState { id: ItemId; x: number; y: number }
-export interface TerrariumState extends DeathHistory, CareAlertState, DevelopmentState { economy?: Economy; fertilizer?: number; collection?: CollectionItem[]; irrigation?: Array<{ x: number; y: number; targetMoisture: number; intervalMinutes: number; lastWateredAtMs: number }>; version: 3; name?: string; webs?: SpiderWeb[]; eggs?: EggState[]; nests?: NestState[]; food?: LandFood[]; replays?: HuntReplay[]; soil: SoilCell[]; history: HistorySample[]; updatedAtMs: number; nextId: number; plants: PlantState[]; seeds: SeedState[]; bugs: BugState[]; items: ItemState[] }
+export interface TerrariumState extends DeathHistory, CareAlertState, DevelopmentState, GardenState { economy?: Economy; fertilizer?: number; collection?: CollectionItem[]; irrigation?: Array<{ x: number; y: number; targetMoisture: number; intervalMinutes: number; lastWateredAtMs: number }>; version: 3; name?: string; webs?: SpiderWeb[]; eggs?: EggState[]; nests?: NestState[]; food?: LandFood[]; replays?: HuntReplay[]; soil: SoilCell[]; history: HistorySample[]; updatedAtMs: number; nextId: number; plants: PlantState[]; seeds: SeedState[]; bugs: BugState[]; items: ItemState[] }
 export interface Change { kind: 'stage' | 'dry' | 'health' | 'phase' | 'sprout' | 'hunt' | 'death' | 'birth' | 'hungry' | 'egg' | 'nest' | 'web' | 'irrigation'; text: string }
 
 export const TERRARIUM_MAX_NAME_LENGTH = 64;
@@ -102,11 +103,12 @@ export function sow(state: TerrariumState, species: SeedSpecies, x: number, y: n
   if (state.plants.length + state.seeds.length >= capacity(state).organisms) throw new Error('Plant capacity reached');
   if (isNestEntrance(state, x, y) || [...state.plants, ...state.seeds].some(p => p.x === x && p.y === y)) throw new Error('That plot is occupied');
   const seed = { id: `seed-${state.nextId++}`, species, x, y, ageHours: 0 };
+  if ((state.seedPackets?.[species] ?? 0) > 0) { state.seedPackets![species]!--; seed.ageHours = 1; }
   state.seeds.push(seed); recordAction(state, 'plant'); return seed;
 }
 
 export function releaseBug(state: TerrariumState, species: BugSpecies, x: number, y: number): BugState {
-  if (!['aphid', 'beetle', 'ladybug', 'spider', 'ant'].includes(species) && !isFlying(species)) throw new Error('Unknown bug species');
+  if (!['aphid', 'beetle', 'ladybug', 'spider', 'ant', 'woodlouse', 'snail'].includes(species) && !isFlying(species)) throw new Error('Unknown bug species');
   if (!inHabitat(state, x, y)) throw new Error('Position must be in the current habitat grid');
   if (state.bugs.length + (state.eggs?.length ?? 0) >= capacity(state).organisms) throw new Error('Bug capacity reached');
   if (species === 'ant' && surfaceAntOccupied(state, x, y)) throw new Error('That surface cell already has an ant');
@@ -233,6 +235,7 @@ function actAnt(state: TerrariumState, bug: BugState, changes: Change[], damage:
     }
     return;
   }
+  if (state.antPolicy?.protectPlantsWhenFed !== false && nests.reduce((sum, n) => sum + n.food, 0) >= Math.max(3, state.bugs.filter(b => b.species === 'ant').length * 2)) return;
   const plant = nearest(bug, state.plants.filter(plant => plant.health > 40 && state.soil[plant.y * capacity(state).size + plant.x].allowAntForaging !== false));
   if (plant && approach(bug, plant)) {
     damage(plant, 1, '蚂蚁采集');
@@ -450,7 +453,10 @@ export function advance(state: TerrariumState, nowMs: number, timezone: string):
         const pot = potAt(state, plant.x, plant.y);
         const growth = hours * (pot?.growth ?? 1) * (plant.species === 'basil' && state.plants.some(p => p.species === 'bean' && p.health >= 60 && Math.abs(p.x - plant.x) + Math.abs(p.y - plant.y) === 1) ? 1.1 : 1);
         plant.naturalGrowthHours = Math.min(48, (plant.naturalGrowthHours ?? Math.min(48, plant.growthHours)) + growth);
+        if (plant.species === 'tomato' || plant.species === 'strawberry') plant.fruitGrowthHours = (plant.fruitGrowthHours ?? 0) + growth;
+        const oldGrowth = plant.growthHours;
         plant.growthHours += growth;
+        if (Math.floor(oldGrowth / 6) !== Math.floor(plant.growthHours / 6)) addLitter(state, plant.x, plant.y);
         if (pot?.recovery) { plant.health = Math.min(100, plant.health + hours * pot.recovery); plant.leafDamage = Math.max(0, (plant.leafDamage ?? 0) - hours * 2); }
         if (plant.leafDamage !== undefined && plant.health >= TERRARIUM_PLANT_RECOVERED_HEALTH) plant.leafDamage = Math.max(0, plant.leafDamage - hours * TERRARIUM_LEAF_DAMAGE.recoveryPerGrowthHour);
       }
@@ -469,7 +475,7 @@ export function advance(state: TerrariumState, nowMs: number, timezone: string):
       for (const bug of currentBugs) {
         if (state.bugs.length + (state.eggs?.length ?? 0) >= capacity(state).organisms) break;
         if (!state.bugs.includes(bug)) continue;
-        if (bug.species === 'ant') continue;
+        if (bug.species === 'ant' || bug.species === 'woodlouse' || bug.species === 'snail') continue;
         if (paired.has(bug.id) || bug.ageHours + hours + 1e-9 < TERRARIUM_BREEDING.maturityHours || Math.floor((bug.ageHours + 1e-9) / TERRARIUM_BREEDING.pairIntervalHours) === Math.floor((bug.ageHours + hours + 1e-9) / TERRARIUM_BREEDING.pairIntervalHours) || bug.energy - hours * 2 < 70) continue;
         if (isPollinator(bug.species) && !clutchCapacity(state.bugs.length + (state.eggs?.length ?? 0), capacity(state).organisms, TERRARIUM_BREEDING.eggsPerClutch)) continue;
         const mate = currentBugs.find(other => other.id !== bug.id && state.bugs.includes(other) && !paired.has(other.id) && other.species === bug.species && other.x === bug.x && other.y === bug.y && other.ageHours + hours + 1e-9 >= TERRARIUM_BREEDING.maturityHours && other.energy - hours * 2 >= 70);
@@ -508,13 +514,14 @@ export function advance(state: TerrariumState, nowMs: number, timezone: string):
         if (bug.species === 'spider') weave(state, bug, end, changes);
         if (isFlying(bug.species)) actFly(state, bug, end, after, changes, () => { pollinations++; });
         else if (bug.species === 'ant') { actAnt(state, bug, changes, damage); spreadAnts(state); }
+        else if (bug.species === 'woodlouse' || bug.species === 'snail') actDecomposer(state, bug);
         else actBug(state, bug, changes, end, after, damage);
         if ((bug.hunger ?? 0) < hungerBeforeEating) bug.lastMeal = { atMs: end, kind: 'foraging' };
       }
       if (!state.bugs.includes(bug)) continue;
-      if (bug.role === 'queen' && bug.inside && bug.ageHours >= TERRARIUM_BREEDING.queenMaturityHours - 1e-9 && bug.ageHours < 120 && bug.energy >= 70 && Math.floor((bug.ageHours - hours + 1e-9) / TERRARIUM_BREEDING.queenIntervalHours) !== Math.floor((bug.ageHours + 1e-9) / TERRARIUM_BREEDING.queenIntervalHours)) {
+      if (state.antPolicy?.breedingEnabled !== false && state.bugs.filter(b => b.species === 'ant').length + (state.eggs ?? []).filter(e => e.species === 'ant').length < (state.antPolicy?.maxPopulation ?? capacity(state).organisms) && bug.role === 'queen' && bug.inside && bug.ageHours >= TERRARIUM_BREEDING.queenMaturityHours - 1e-9 && bug.ageHours < 120 && bug.energy >= 70 && Math.floor((bug.ageHours - hours + 1e-9) / TERRARIUM_BREEDING.queenIntervalHours) !== Math.floor((bug.ageHours + 1e-9) / TERRARIUM_BREEDING.queenIntervalHours)) {
         const eggs = state.eggs ??= [];
-        const count = Math.min(TERRARIUM_BREEDING.eggsPerClutch, capacity(state).organisms - state.bugs.length - eggs.length);
+        const count = Math.min(TERRARIUM_BREEDING.eggsPerClutch, capacity(state).organisms - state.bugs.length - eggs.length, (state.antPolicy?.maxPopulation ?? capacity(state).organisms) - state.bugs.filter(b => b.species === 'ant').length - eggs.filter(e => e.species === 'ant').length);
         if (count > 0) {
           for (let i = 0; i < count; i++) eggs.push({ id: `egg-${state.nextId++}`, species: 'ant', x: bug.x, y: bug.y, inside: { ...bug.inside }, laidAtMs: end, hatchesAtMs: end + TERRARIUM_BREEDING.incubationHours * HOUR_MS });
           bug.energy -= 25;
@@ -678,12 +685,12 @@ function validReplays(state: Partial<TerrariumState>): boolean {
 export function validState(value: unknown): value is TerrariumState {
   if (!value || typeof value !== 'object') return false;
   const state = value as Partial<TerrariumState>;
-  if (!validEconomy(state) || (state.fertilizer !== undefined && (!Number.isSafeInteger(state.fertilizer) || state.fertilizer < 0)) || !validDevelopment(state, 'land') || !validCareAlerts(state.careAlerts) || !validDeaths(state.deaths, state.updatedAtMs!, capacity(state).size) || !validCollection(state.collection, 'land', capacity(state).collection) || (state.irrigation !== undefined && (!Array.isArray(state.irrigation) || state.irrigation.length > capacity(state).size ** 2 || new Set(state.irrigation.map(c => `${c?.x},${c?.y}`)).size !== state.irrigation.length || !state.irrigation.every(c => c && inHabitat(state, c.x, c.y) && Number.isFinite(c.targetMoisture) && c.targetMoisture >= 0 && c.targetMoisture <= 100 && Number.isFinite(c.intervalMinutes) && c.intervalMinutes >= 1 && c.intervalMinutes <= 1440 && Number.isFinite(c.lastWateredAtMs))))) return false;
+  if (!Array.isArray(state.plants) || !validGarden(state as TerrariumState) || !validEconomy(state) || (state.fertilizer !== undefined && (!Number.isSafeInteger(state.fertilizer) || state.fertilizer < 0)) || !validDevelopment(state, 'land') || !validCareAlerts(state.careAlerts) || !validDeaths(state.deaths, state.updatedAtMs!, capacity(state).size) || !validCollection(state.collection, 'land', capacity(state).collection) || (state.irrigation !== undefined && (!Array.isArray(state.irrigation) || state.irrigation.length > capacity(state).size ** 2 || new Set(state.irrigation.map(c => `${c?.x},${c?.y}`)).size !== state.irrigation.length || !state.irrigation.every(c => c && inHabitat(state, c.x, c.y) && Number.isFinite(c.targetMoisture) && c.targetMoisture >= 0 && c.targetMoisture <= 100 && Number.isFinite(c.intervalMinutes) && c.intervalMinutes >= 1 && c.intervalMinutes <= 1440 && Number.isFinite(c.lastWateredAtMs))))) return false;
   return state.version === 3 && (state.name === undefined || validName(state.name)) && validHabitat(state) && validReplays(state) && Number.isFinite(state.updatedAtMs) && Number.isSafeInteger(state.nextId) && state.nextId! >= 1 &&
     Array.isArray(state.plants) && state.plants.length <= capacity(state).organisms &&
     state.plants.every(p => p && typeof p.id === 'string' && p.id.length <= 32 && Object.hasOwn(TERRARIUM_PLANT_REQUIREMENTS, p.species) && inHabitat(state, p.x, p.y) && Number.isFinite(p.moisture) && p.moisture >= 0 && p.moisture <= 100 && Number.isFinite(p.growthHours) && p.growthHours >= 0 && (p.naturalGrowthHours === undefined || Number.isFinite(p.naturalGrowthHours) && p.naturalGrowthHours >= 0 && p.naturalGrowthHours <= 48 && p.naturalGrowthHours <= p.growthHours + 1e-8) && Number.isInteger(p.stage) && p.stage >= 0 && p.stage <= 3 && typeof p.dry === 'boolean' && Number.isFinite(p.health) && p.health >= 0 && p.health <= 100 && (p.pollination === undefined || Number.isSafeInteger(p.pollination) && p.pollination >= 0 && p.pollination <= TERRARIUM_POLLINATION.maxCharges) && (p.healthWarning === undefined || typeof p.healthWarning === 'boolean') && (p.leafDamage === undefined || (Number.isFinite(p.leafDamage) && p.leafDamage >= 0 && p.leafDamage <= 100)) && (p.seedRounds === undefined || (producesSeeds(p.species) && Number.isSafeInteger(p.seedRounds) && p.seedRounds >= 0 && p.seedRounds <= sunflowerSeedRounds(p.growthHours)))) &&
     Array.isArray(state.seeds) && state.seeds.length <= capacity(state).organisms && state.plants.length + state.seeds.length <= capacity(state).organisms && state.seeds.every(s => s && typeof s.id === 'string' && Object.hasOwn(TERRARIUM_PLANT_REQUIREMENTS, s.species) && inHabitat(state, s.x, s.y) && Number.isFinite(s.ageHours) && s.ageHours >= 0) &&
-    Array.isArray(state.bugs) && state.bugs.length <= capacity(state).organisms && state.bugs.every(b => b && typeof b.id === 'string' && (['aphid', 'beetle', 'ladybug', 'spider', 'ant'].includes(b.species) || isFlying(b.species)) && inHabitat(state, b.x, b.y) && Number.isFinite(b.energy) && b.energy >= 0 && b.energy <= 100 && (b.pollen === undefined || isPollinator(b.species) && b.pollen && typeof b.pollen.plantId === 'string' && b.pollen.plantId.length >= 1 && b.pollen.plantId.length <= 32 && Object.hasOwn(TERRARIUM_PLANT_REQUIREMENTS, b.pollen.species)) && validMeal(b.lastMeal, state.updatedAtMs!) && (b.hunger === undefined || (Number.isFinite(b.hunger) && b.hunger >= 0 && b.hunger <= 100)) && (b.carrying === undefined || (b.species === 'ant' && Number.isInteger(b.carrying) && b.carrying >= 0 && b.carrying <= 5)) && Number.isFinite(b.ageHours) && b.ageHours >= 0) &&
+    Array.isArray(state.bugs) && state.bugs.length <= capacity(state).organisms && state.bugs.every(b => b && typeof b.id === 'string' && (['aphid', 'beetle', 'ladybug', 'spider', 'ant', 'woodlouse', 'snail'].includes(b.species) || isFlying(b.species)) && inHabitat(state, b.x, b.y) && Number.isFinite(b.energy) && b.energy >= 0 && b.energy <= 100 && (b.pollen === undefined || isPollinator(b.species) && b.pollen && typeof b.pollen.plantId === 'string' && b.pollen.plantId.length >= 1 && b.pollen.plantId.length <= 32 && Object.hasOwn(TERRARIUM_PLANT_REQUIREMENTS, b.pollen.species)) && validMeal(b.lastMeal, state.updatedAtMs!) && (b.hunger === undefined || (Number.isFinite(b.hunger) && b.hunger >= 0 && b.hunger <= 100)) && (b.carrying === undefined || (b.species === 'ant' && Number.isInteger(b.carrying) && b.carrying >= 0 && b.carrying <= 5)) && Number.isFinite(b.ageHours) && b.ageHours >= 0) &&
     (state.eggs === undefined || (Array.isArray(state.eggs) && state.eggs.length <= capacity(state).organisms && state.eggs.every(egg => egg && typeof egg.id === 'string' && egg.id.length <= 32 && (['beetle', 'ladybug', 'spider', 'ant'].includes(egg.species) || isFlying(egg.species)) && inHabitat(state, egg.x, egg.y) && Number.isFinite(egg.laidAtMs) && egg.laidAtMs <= state.updatedAtMs! && Number.isFinite(egg.hatchesAtMs) && egg.hatchesAtMs > egg.laidAtMs && egg.hatchesAtMs <= egg.laidAtMs + 6 * HOUR_MS))) &&
     state.bugs.length + (state.eggs?.length ?? 0) <= capacity(state).organisms &&
     (state.nests === undefined || (Array.isArray(state.nests) && state.nests.length <= 5 && state.nests.every(nest => nest && typeof nest.id === 'string' && nest.id.length <= 32 && inHabitat(state, nest.x, nest.y) && Number.isInteger(nest.depth) && nest.depth >= 1 && nest.depth <= 5 && Number.isInteger(nest.food) && nest.food >= 0 && nest.food <= nest.depth * 20) && new Set(state.nests.map(nest => `${nest.x},${nest.y}`)).size === state.nests.length)) &&

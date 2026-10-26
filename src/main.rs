@@ -167,6 +167,7 @@ async fn run() -> Result<()> {
                 release_id: std::env::var("CORTICO_TERRARIUM_RELEASE_ID").ok(),
                 release_root: std::env::var_os("CORTICO_TERRARIUM_DEPLOY_ROOT").map(PathBuf::from),
             };
+            let shutdown_request = shutdown_signal();
             let private = if let Some(listener) = admin_listener {
                 let bind = listener.local_addr()?;
                 let network = AdminNetwork::new(bind, cidr.as_deref().unwrap())?;
@@ -202,7 +203,7 @@ async fn run() -> Result<()> {
                 Ok::<(), std::io::Error>(())
             };
             let stop = async move {
-                shutdown_signal().await;
+                shutdown_request.await;
                 let _ = shutdown.send(true);
                 Ok::<(), std::io::Error>(())
             };
@@ -250,16 +251,16 @@ fn managed_command() -> Result<Command> {
     })
 }
 
-async fn shutdown_signal() {
+fn shutdown_signal() -> impl std::future::Future<Output = ()> {
     #[cfg(unix)]
-    {
-        let mut terminate =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                .expect("SIGTERM handler");
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .expect("SIGTERM handler");
+    async move {
+        #[cfg(unix)]
         tokio::select! { _=tokio::signal::ctrl_c()=>{},_=terminate.recv()=>{} }
+        #[cfg(not(unix))]
+        let _ = tokio::signal::ctrl_c().await;
     }
-    #[cfg(not(unix))]
-    let _ = tokio::signal::ctrl_c().await;
 }
 
 async fn wait_for_shutdown(mut receiver: tokio::sync::watch::Receiver<bool>) {

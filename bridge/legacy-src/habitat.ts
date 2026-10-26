@@ -1,6 +1,6 @@
 import { potAt, type Economy } from './merchant.ts';
 import { capacity, nearFacility, type DevelopmentState } from './progression.ts';
-export type PlantSpecies = 'fern' | 'clover' | 'moss' | 'basil' | 'bean' | 'sunflower' | 'mint' | 'daisy' | 'lavender';
+export type PlantSpecies = 'fern' | 'clover' | 'moss' | 'basil' | 'bean' | 'sunflower' | 'mint' | 'daisy' | 'lavender' | 'tomato' | 'strawberry' | 'mushroom';
 export interface PlantRequirements { minMoisture: number; maxMoisture: number; minLight: number; maxLight: number }
 export interface SoilCell { x: number; y: number; moisture: number; allowAntForaging?: boolean; antBackfilled?: boolean }
 export const TERRARIUM_LEAF_DAMAGE = { perHarvestHealth: 5, recoveryPerGrowthHour: 2 } as const;
@@ -10,6 +10,9 @@ export interface Habitat extends DevelopmentState { economy?: Economy; items: Re
 
 /** Simulation conditions, expressed as soil moisture (0–100) and daylight (0–1). */
 export const TERRARIUM_PLANT_REQUIREMENTS: Record<PlantSpecies, PlantRequirements> = {
+  tomato: { minMoisture: 35, maxMoisture: 75, minLight: .7, maxLight: 1 },
+  strawberry: { minMoisture: 35, maxMoisture: 80, minLight: .5, maxLight: 1 },
+  mushroom: { minMoisture: 50, maxMoisture: 90, minLight: .15, maxLight: .6 },
   fern: { minMoisture: 30, maxMoisture: 85, minLight: .15, maxLight: .7 },
   clover: { minMoisture: 20, maxMoisture: 80, minLight: .45, maxLight: 1 },
   moss: { minMoisture: 45, maxMoisture: 90, minLight: .15, maxLight: .4 },
@@ -73,7 +76,7 @@ export const TERRARIUM_FLOWER_BLOOM_HOURS = 18;
 
 /** Flowers follow accumulated suitable daylight growth; fern and moss do not flower. */
 export function flowerStage(plant: { species: string; growthHours?: number; health: number; moisture: number; dry: boolean }): 'bud' | 'bloom' | undefined {
-  if (plant.species !== 'clover' && plant.species !== 'basil' && plant.species !== 'bean' && plant.species !== 'sunflower' && plant.species !== 'mint' && plant.species !== 'daisy' && plant.species !== 'lavender') return;
+  if (plant.species !== 'tomato' && plant.species !== 'strawberry' && plant.species !== 'clover' && plant.species !== 'basil' && plant.species !== 'bean' && plant.species !== 'sunflower' && plant.species !== 'mint' && plant.species !== 'daisy' && plant.species !== 'lavender') return;
   if (hasSeedHead(plant)) return;
   const needs = TERRARIUM_PLANT_REQUIREMENTS[plant.species];
   if (plant.health < TERRARIUM_PLANT_RECOVERED_HEALTH || plant.dry || plant.moisture < needs.minMoisture || plant.moisture > needs.maxMoisture) return;

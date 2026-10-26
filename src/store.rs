@@ -21,6 +21,7 @@ const DOCUMENTS: &[&str] = &[
     "story-granary.json",
     "story-seedbed.json",
     "admin-token",
+    "neighbors.json",
 ];
 #[derive(Clone)]
 pub struct Store {
@@ -146,7 +147,7 @@ impl Store {
         conn.pragma_update(None, "synchronous", "FULL")?;
         let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
         ensure!(version <= 1, "Database schema is newer than this binary");
-        conn.execute_batch("CREATE TABLE IF NOT EXISTS boxes(id TEXT PRIMARY KEY,kind TEXT NOT NULL,score REAL NOT NULL,reported_at TEXT NOT NULL,revision TEXT,entry TEXT NOT NULL,id_sort TEXT NOT NULL,search TEXT NOT NULL,plants INTEGER NOT NULL,animals INTEGER NOT NULL); CREATE INDEX IF NOT EXISTS boxes_rank ON boxes(kind,score DESC,id_sort); CREATE INDEX IF NOT EXISTS boxes_recent ON boxes(kind,reported_at DESC,id_sort); CREATE TABLE IF NOT EXISTS credentials(id TEXT PRIMARY KEY,token TEXT NOT NULL); CREATE TABLE IF NOT EXISTS legacy_documents(name TEXT PRIMARY KEY,content BLOB NOT NULL); PRAGMA user_version=1;")?;
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS boxes(id TEXT PRIMARY KEY,kind TEXT NOT NULL,score REAL NOT NULL,reported_at TEXT NOT NULL,revision TEXT,entry TEXT NOT NULL,id_sort TEXT NOT NULL,search TEXT NOT NULL,plants INTEGER NOT NULL,animals INTEGER NOT NULL); CREATE INDEX IF NOT EXISTS boxes_counts ON boxes(kind,plants,animals); CREATE INDEX IF NOT EXISTS boxes_rank ON boxes(kind,score DESC,id_sort); CREATE INDEX IF NOT EXISTS boxes_recent ON boxes(kind,reported_at DESC,id_sort); CREATE TABLE IF NOT EXISTS credentials(id TEXT PRIMARY KEY,token TEXT NOT NULL); CREATE TABLE IF NOT EXISTS legacy_documents(name TEXT PRIMARY KEY,content BLOB NOT NULL); PRAGMA user_version=1;")?;
         Ok(Self {
             path,
             writer: Arc::new(Mutex::new(conn)),
@@ -388,7 +389,7 @@ impl Store {
             "score DESC,id_sort"
         };
         let sql = format!(
-            "WITH ranked AS (SELECT *,row_number() OVER(ORDER BY score DESC,id_sort) rank FROM boxes WHERE kind=?1) SELECT entry,score,rank FROM ranked WHERE instr(search,?2)>0 ORDER BY {order} LIMIT ?3 OFFSET ?4"
+            "WITH ranked AS (SELECT id,score,id_sort,reported_at,search,row_number() OVER(ORDER BY score DESC,id_sort) rank FROM boxes WHERE kind=?1), page AS MATERIALIZED (SELECT id,score,rank,row_number() OVER(ORDER BY {order}) page_order FROM ranked WHERE instr(search,?2)>0 ORDER BY {order} LIMIT ?3 OFFSET ?4) SELECT boxes.entry,page.score,page.rank FROM page JOIN boxes ON boxes.id=page.id ORDER BY page.page_order"
         );
         let mut stmt = tx.prepare(&sql)?;
         let entries = stmt
@@ -574,6 +575,8 @@ pub(crate) fn scene_entry(entry: &Value) -> Value {
             "plants",
             "soil",
             "economy",
+            "decorations",
+            "litter",
             "seeds",
             "bugs",
             "items",

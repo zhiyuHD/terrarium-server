@@ -34,7 +34,7 @@ export function validEconomy(state: Partial<TerrariumState>): boolean {
   for (const p of e.pots) { if (!p || !Object.hasOwn(TERRARIUM_POTS, p.kind) || !inHabitat(state, p.x, p.y)) return false; cost += TERRARIUM_POTS[p.kind].price; }
   return owned <= 64 && cost === e.spent && new Set(e.pots.map(p => `${p.x},${p.y}`)).size === e.pots.length;
 }
-const prices = { fern: 24, clover: 20, moss: 20, basil: 28, bean: 28, sunflower: 36, mint: 26, daisy: 32, lavender: 36 };
+const prices = { fern: 24, clover: 20, moss: 20, basil: 28, bean: 28, sunflower: 36, mint: 26, daisy: 32, lavender: 36, tomato: 30, strawberry: 32, mushroom: 24 };
 export function plantQuote(plant: PlantState) {
   const hours = plant.naturalGrowthHours ?? Math.min(48, plant.growthHours);
   const eligible = hours + 1e-8 >= 6 && plant.health >= 40;
@@ -87,7 +87,7 @@ export function trade(state: TerrariumState, args: Record<string, unknown>): unk
 export const TERRARIUM_MERCHANT_TOOL_DECL: Omit<ToolDef, 'handler'> = {
   name: 'terrarium_merchant', tags: ['read', 'write'],
   description: 'Land merchant and pot shop. status returns coins, inventory, catalog and plant sale quotes. sell permanently removes a living land plant by id: requires 6 natural growth hours and health >=40; fertilizer grants no sale value. buy purchases one pot into inventory; place equips it at x,y (replaced pot returns to inventory); remove returns a placed pot. Pots stay when plants are sold, composted, collected or die. One effect per plot; no stacking. still blocks fertilizer but does not freeze health, water or insects. Coins are local snapshot data, separate from ecology score; decorative coin item is unrelated.',
-  parameters: { type: 'object', additionalProperties: false, properties: { action: { type: 'string', enum: ['status', 'sell', 'buy', 'place', 'remove'] }, id: { type: 'string' }, pot: { type: 'string', enum: Object.keys(TERRARIUM_POTS) }, x: { type: 'integer', minimum: 0 }, y: { type: 'integer', minimum: 0 } } },
+  parameters: { type: 'object', additionalProperties: false, properties: { action: { type: 'string', enum: ['status', 'sell', 'sell_fruit', 'buy', 'place', 'remove'] }, species: { type: 'string', enum: ['tomato', 'strawberry'] }, portions: { type: 'integer', minimum: 1, maximum: 10000 }, id: { type: 'string' }, pot: { type: 'string', enum: Object.keys(TERRARIUM_POTS) }, x: { type: 'integer', minimum: 0 }, y: { type: 'integer', minimum: 0 } } },
 };
 
 export interface CoinEntry { rank: number; competitiveRank: number; id: string; name?: string; coins: number; earned: number; reportedAt: string }
