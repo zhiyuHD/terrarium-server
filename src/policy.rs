@@ -71,7 +71,7 @@ pub(crate) fn validate_document(name: &str, value: &Value) -> Result<()> {
                 ensure!(
                     matches!(
                         logo["version"].as_str(),
-                        Some("0.8.6" | "0.8.7" | "0.8.8" | "0.8.9" | "0.8.10")
+                        Some("0.8.6" | "0.8.7" | "0.8.8" | "0.8.9" | "0.8.10" | "0.9.0")
                     ),
                     "Invalid logo version"
                 );
@@ -80,7 +80,7 @@ pub(crate) fn validate_document(name: &str, value: &Value) -> Result<()> {
                     schedule.is_null()
                         || (matches!(
                             schedule["version"].as_str(),
-                            Some("0.8.6" | "0.8.7" | "0.8.8" | "0.8.9" | "0.8.10")
+                            Some("0.8.6" | "0.8.7" | "0.8.8" | "0.8.9" | "0.8.10" | "0.9.0")
                         ) && at(&schedule["at"]).is_some()),
                     "Invalid logo schedule"
                 );

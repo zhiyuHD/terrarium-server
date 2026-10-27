@@ -231,7 +231,7 @@ impl Store {
             && input["cancel"] != true
             && !matches!(
                 input["version"].as_str(),
-                Some("0.8.6" | "0.8.7" | "0.8.8" | "0.8.9" | "0.8.10")
+                Some("0.8.6" | "0.8.7" | "0.8.8" | "0.8.9" | "0.8.10" | "0.9.0")
             )
         {
             return reject(400, "Unknown logo version");
