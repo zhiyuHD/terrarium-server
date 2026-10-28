@@ -199,6 +199,7 @@ impl Store {
     pub fn commit_entry(&self, entry: &Value, previous: Option<&Value>) -> Result<bool> {
         let id = entry["id"].as_str().context("Invalid ID")?;
         validate_entry(id, entry)?;
+        let serialized = serde_json::to_string(entry)?;
         self.transaction(|tx| {
             let current: Option<Option<String>> = tx
                 .query_row("SELECT revision FROM boxes WHERE id=?1", [id], |r| r.get(0))
@@ -207,7 +208,7 @@ impl Store {
             if current != expected {
                 return Ok(false);
             }
-            insert_entry(tx, id, entry)?;
+            insert_serialized_entry(tx, id, entry, &serialized)?;
             crate::story::on_report(self, tx, entry)?;
             tx.execute(
                 "DELETE FROM legacy_documents WHERE name='leaderboard.json'",
@@ -258,6 +259,7 @@ impl Store {
         entry: &Value,
     ) -> Result<()> {
         validate_entry(id, entry)?;
+        let serialized = serde_json::to_string(entry)?;
         let mut conn = self.writer()?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let revision: Option<Option<String>> = tx
@@ -267,7 +269,7 @@ impl Store {
             revision.is_some() && revision.flatten().as_deref() == expected_revision,
             "Report revision conflict"
         );
-        insert_entry(&tx, id, entry)?;
+        insert_serialized_entry(&tx, id, entry, &serialized)?;
         tx.execute(
             "DELETE FROM legacy_documents WHERE name='leaderboard.json'",
             [],
@@ -518,6 +520,15 @@ impl Store {
     }
 }
 fn insert_entry(conn: &Connection, id: &str, entry: &Value) -> Result<()> {
+    let serialized = serde_json::to_string(entry)?;
+    insert_serialized_entry(conn, id, entry, &serialized)
+}
+fn insert_serialized_entry(
+    conn: &Connection,
+    id: &str,
+    entry: &Value,
+    serialized: &str,
+) -> Result<()> {
     let state = &entry["state"];
     let id_sort: String = id
         .chars()
@@ -535,7 +546,7 @@ fn insert_entry(conn: &Connection, id: &str, entry: &Value) -> Result<()> {
         .as_array()
         .context("Missing animals")?
         .len();
-    conn.execute("INSERT INTO boxes VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,score=excluded.score,reported_at=excluded.reported_at,revision=excluded.revision,entry=excluded.entry,id_sort=excluded.id_sort,search=excluded.search,plants=excluded.plants,animals=excluded.animals",params![id,entry.get("kind").and_then(Value::as_str).unwrap_or("land"),score(state)?,entry["reportedAt"].as_str(),entry["reportRevision"].as_str(),serde_json::to_string(entry)?,id_sort,search,plants as i64,animals as i64])?;
+    conn.execute("INSERT INTO boxes VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,score=excluded.score,reported_at=excluded.reported_at,revision=excluded.revision,entry=excluded.entry,id_sort=excluded.id_sort,search=excluded.search,plants=excluded.plants,animals=excluded.animals",params![id,entry.get("kind").and_then(Value::as_str).unwrap_or("land"),score(state)?,entry["reportedAt"].as_str(),entry["reportRevision"].as_str(),serialized,id_sort,search,plants as i64,animals as i64])?;
     crate::summary_cache::write(conn, id, entry, &id_sort)?;
     Ok(())
 }

@@ -79,7 +79,10 @@ pub async fn upgrade(
     let opt_in = headers
         .get("x-cortico-protocol-notices")
         .is_some_and(|v| v == "1");
-    ws.max_message_size(MAX_BYTES)
+    ws.read_buffer_size(8 * 1024)
+        .write_buffer_size(8 * 1024)
+        .max_write_buffer_size(64 * 1024)
+        .max_message_size(MAX_BYTES)
         .max_frame_size(MAX_BYTES)
         .on_upgrade(move |socket| connection(socket, ingestion, id, version, opt_in))
 }

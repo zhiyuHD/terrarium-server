@@ -105,5 +105,8 @@ async fn twenty_four_small_http_reports_share_actual_bytes_instead_of_three_maxi
     assert_eq!(counts["active"], 0);
     assert_eq!(counts["waiting"], 0);
     assert_eq!(counts["accepted"]["http"], 24);
-    assert!(counts["peakActive"].as_u64().unwrap() <= 4);
+    assert!(
+        counts["peakActive"].as_u64().unwrap()
+            <= terrarium_server::ingestion::REPORT_CONCURRENCY as u64
+    );
 }

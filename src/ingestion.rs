@@ -15,6 +15,7 @@ use std::{
     },
 };
 use tokio::sync::Semaphore;
+pub const REPORT_CONCURRENCY: usize = 8;
 pub static REPORT_BUFFERS: LazyLock<Arc<Semaphore>> =
     LazyLock::new(|| Arc::new(Semaphore::new(24 * 1024 * 1024)));
 
@@ -83,7 +84,7 @@ impl Ingestion {
             store,
             validators: std::array::from_fn(|_| LegacyValidator::default()),
             next_validator: Arc::new(AtomicUsize::new(0)),
-            pending: Arc::new(Semaphore::new(4)),
+            pending: Arc::new(Semaphore::new(REPORT_CONCURRENCY)),
             metrics: Arc::new(crate::metrics::Metrics::default()),
             gates: Arc::new(Mutex::new(HashMap::new())),
         }
