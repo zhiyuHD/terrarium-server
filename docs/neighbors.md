@@ -5,6 +5,6 @@
 
 The optional `neighbors.json` document uses the existing epoch-2 legacy_documents table. Backups include it and current exports/imports retain it. Older binaries ignore the document; no existing box, credential, snapshot or cursor format changes.
 
-Report admission retains four concurrent processing slots and waits at most two seconds for a slot. Raw incoming report buffers remain globally bounded at 24 MiB. Admission timeout returns a retryable 503. Supported-client policy checks project one client's metadata rather than deserialize all clients. Policy cache entries expire within 60 seconds and compare current effective cloud controls before reuse, including scheduled changes. Announcement polling skips writer transactions when no receipts need cleanup.
+Report admission retains four concurrent processing slots and waits at most two seconds for a slot. Raw incoming report buffers remain globally bounded at 24 MiB; HTTP reserves actual received bytes. Admission timeout returns a retryable 503. Supported-client policy checks project one client's metadata rather than deserialize all clients. Policy cache entries expire within 60 seconds and compare current effective cloud controls before reuse, including scheduled changes. Announcement polling skips writer transactions when no receipts need cleanup.
 
-Gallery ranking reads scalar metadata before selecting a page; full snapshots are loaded only for that page. The counts index is derived metadata and does not change the data epoch.
+Ranking summaries and admin client statistics use a derived cache; see report-processing.md. Gallery ranking reads scalar metadata before selecting a page; full snapshots are loaded only for that page. The counts index is derived metadata and does not change the data epoch.

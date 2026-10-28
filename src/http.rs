@@ -13,7 +13,12 @@ use axum::{
     routing::{any, get, post, put},
 };
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{Arc, LazyLock},
+};
+use tokio::sync::Semaphore;
+static LEADERBOARD_READS: LazyLock<Arc<Semaphore>> = LazyLock::new(|| Arc::new(Semaphore::new(2)));
 #[derive(Clone)]
 pub struct App {
     pub store: Store,
@@ -26,6 +31,7 @@ pub fn router(app: App) -> Router {
     crate::photos::start_cleanup(&photos, app.store.clone());
     Router::new()
         .route("/", get(crate::presentation::index))
+        .route("/support-qr.png", get(crate::support::qr))
         .route("/api/presentation", get(crate::presentation::status))
         .route(
             "/scene.js",
@@ -41,7 +47,7 @@ pub fn router(app: App) -> Router {
         )
         .route(
             "/forum",
-            get(|| async { Html(include_str!("../web/forum.html")) }),
+            get(|| async { Html(crate::support::page(include_str!("../web/forum.html"))) }),
         )
         .route("/api/forum/status", get(crate::forum::status))
         .route("/api/forum/{*path}", any(crate::forum::handle))
@@ -103,7 +109,7 @@ async fn health(State(app): State<App>) -> Response {
         Ok(c) => c,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(e.body())).into_response(),
     };
-    Json(json!({"ok":true,"version":env!("CARGO_PKG_VERSION"),"releaseId":app.release_id,"implementation":"rust","readOnly":app.ingestion.is_none(),"websocketPush":app.ingestion.is_some(),"httpPushEnabled":app.ingestion.is_some()&&controls["httpPush"]["enabled"]==true,"minimumClientVersion":controls["minimumClientVersion"]["version"]})).into_response()
+    Json(json!({"ok":true,"version":env!("CARGO_PKG_VERSION"),"releaseId":app.release_id,"implementation":"rust","readOnly":app.ingestion.is_none(),"websocketPush":app.ingestion.is_some(),"httpPushEnabled":app.ingestion.is_some()&&controls["httpPush"]["enabled"]==true,"minimumClientVersion":controls["minimumClientVersion"]["version"],"reportProcessing":app.ingestion.as_ref().map(|ingestion|ingestion.metrics().processing_status())})).into_response()
 }
 
 fn error(status: StatusCode, message: &str) -> Response {
@@ -137,66 +143,75 @@ async fn leaderboard(
     if kind.as_ref().is_some_and(|v| v != "land" && v != "water") {
         return error(StatusCode::BAD_REQUEST, "Invalid box kind");
     }
-    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Value> {
-        if query.get("view").is_some_and(|v| v == "coins") {
-            anyhow::ensure!(
-                kind.as_deref() == Some("land"),
-                "Coin ranking requires land"
-            );
-            let limit = query
-                .get("limit")
-                .map(|v| v.parse::<usize>())
-                .transpose()?
-                .unwrap_or(20);
-            anyhow::ensure!((1..=100).contains(&limit), "Invalid coin ranking limit");
-            return app
-                .store
-                .coins(limit, query.get("ownId").map(String::as_str));
-        }
-        if query.get("view").is_some_and(|v| v == "gallery") {
-            let kind = kind
-                .as_deref()
-                .ok_or_else(|| anyhow::anyhow!("Gallery requires a box kind"))?;
-            let number = |key: &str, default: usize| -> anyhow::Result<usize> {
-                Ok(query
-                    .get(key)
-                    .map(|v| v.parse())
+    let permit = LEADERBOARD_READS.clone().acquire_owned().await.unwrap();
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<u8>> {
+        let _permit = permit;
+        let value = (|| -> anyhow::Result<Value> {
+            if query.get("view").is_some_and(|v| v == "coins") {
+                anyhow::ensure!(
+                    kind.as_deref() == Some("land"),
+                    "Coin ranking requires land"
+                );
+                let limit = query
+                    .get("limit")
+                    .map(|v| v.parse::<usize>())
                     .transpose()?
-                    .unwrap_or(default))
-            };
-            let page = number("page", 1)?;
-            let size = number("pageSize", 4)?;
-            let sort = query.get("sort").map(String::as_str).unwrap_or("score");
-            let search = query.get("q").map(String::as_str).unwrap_or("").trim();
-            anyhow::ensure!(
-                page > 0
-                    && page <= 9_007_199_254_740_991
-                    && (1..=12).contains(&size)
-                    && matches!(sort, "score" | "recent")
-                    && search.encode_utf16().count() <= 100,
-                "Invalid gallery pagination, sort or search"
-            );
-            return app
-                .store
-                .gallery(kind, search, sort == "recent", page, size);
-        }
-        if query.get("view").is_some_and(|v| v == "summary") {
-            let kind = kind.ok_or_else(|| anyhow::anyhow!("Summary requires kind"))?;
-            let limit = query
-                .get("limit")
-                .map(|v| v.parse::<usize>())
-                .transpose()?
-                .unwrap_or(20);
-            anyhow::ensure!((1..=100).contains(&limit), "Invalid summary limit");
-            return app
-                .store
-                .summary(&kind, limit, query.get("ownId").map(String::as_str));
-        }
-        Ok(Value::Array(app.store.ranked(kind.as_deref())?))
+                    .unwrap_or(20);
+                anyhow::ensure!((1..=100).contains(&limit), "Invalid coin ranking limit");
+                return app
+                    .store
+                    .coins(limit, query.get("ownId").map(String::as_str));
+            }
+            if query.get("view").is_some_and(|v| v == "gallery") {
+                let kind = kind
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("Gallery requires a box kind"))?;
+                let number = |key: &str, default: usize| -> anyhow::Result<usize> {
+                    Ok(query
+                        .get(key)
+                        .map(|v| v.parse())
+                        .transpose()?
+                        .unwrap_or(default))
+                };
+                let page = number("page", 1)?;
+                let size = number("pageSize", 4)?;
+                let sort = query.get("sort").map(String::as_str).unwrap_or("score");
+                let search = query.get("q").map(String::as_str).unwrap_or("").trim();
+                anyhow::ensure!(
+                    page > 0
+                        && page <= 9_007_199_254_740_991
+                        && (1..=12).contains(&size)
+                        && matches!(sort, "score" | "recent")
+                        && search.encode_utf16().count() <= 100,
+                    "Invalid gallery pagination, sort or search"
+                );
+                return app
+                    .store
+                    .gallery(kind, search, sort == "recent", page, size);
+            }
+            if query.get("view").is_some_and(|v| v == "summary") {
+                let kind = kind.ok_or_else(|| anyhow::anyhow!("Summary requires kind"))?;
+                let limit = query
+                    .get("limit")
+                    .map(|v| v.parse::<usize>())
+                    .transpose()?
+                    .unwrap_or(20);
+                anyhow::ensure!((1..=100).contains(&limit), "Invalid summary limit");
+                return app
+                    .store
+                    .summary(&kind, limit, query.get("ownId").map(String::as_str));
+            }
+            Ok(Value::Array(app.store.ranked(kind.as_deref())?))
+        })()?;
+        Ok(serde_json::to_vec(&value)?)
     })
     .await;
     match result {
-        Ok(Ok(value)) => Json(value).into_response(),
+        Ok(Ok(bytes)) => (
+            [(axum::http::header::CONTENT_TYPE, "application/json")],
+            bytes,
+        )
+            .into_response(),
         Ok(Err(_)) => error(StatusCode::BAD_REQUEST, "Invalid leaderboard request"),
         Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "Read failed"),
     }
@@ -243,23 +258,43 @@ async fn report(State(app): State<App>, headers: HeaderMap, request: Request) ->
     let Some(ingestion) = app.ingestion else {
         return error(StatusCode::NOT_IMPLEMENTED, "Write preview is disabled");
     };
-    let Ok(_buffer) = crate::ingestion::REPORT_BUFFERS
-        .clone()
-        .try_acquire_many_owned(MAX_BYTES as u32)
-    else {
+    // Reserve actual received bytes; tiny legacy requests cannot occupy three 8 MiB slots.
+    let Ok(mut buffer) = crate::ingestion::REPORT_BUFFERS.clone().try_acquire_owned() else {
+        ingestion.metrics().buffer_busy();
         return error(
             StatusCode::SERVICE_UNAVAILABLE,
             "Report buffers are busy; retry later",
         );
     };
-    let body = match to_bytes(request.into_body(), MAX_BYTES).await {
-        Ok(b) => b,
-        Err(_) => return error(StatusCode::PAYLOAD_TOO_LARGE, "Report too large"),
-    };
-    let input: Value = match serde_json::from_slice(&body) {
-        Ok(v) => v,
-        Err(_) => return error(StatusCode::BAD_REQUEST, "Invalid JSON"),
-    };
+    let mut stream = request.into_body().into_data_stream();
+    let mut body = Vec::new();
+    while let Some(chunk) = futures_util::StreamExt::next(&mut stream).await {
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(_) => return error(StatusCode::BAD_REQUEST, "Report body read failed"),
+        };
+        if body.len() + chunk.len() > MAX_BYTES {
+            return error(StatusCode::PAYLOAD_TOO_LARGE, "Report too large");
+        }
+        let Ok(permit) = crate::ingestion::REPORT_BUFFERS
+            .clone()
+            .try_acquire_many_owned(chunk.len() as u32)
+        else {
+            ingestion.metrics().buffer_busy();
+            return error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Report buffers are busy; retry later",
+            );
+        };
+        buffer.merge(permit);
+        body.extend_from_slice(&chunk);
+    }
+    let input: Value =
+        match tokio::task::spawn_blocking(move || serde_json::from_slice(&body)).await {
+            Ok(Ok(input)) => input,
+            Ok(Err(_)) => return error(StatusCode::BAD_REQUEST, "Invalid JSON"),
+            Err(_) => return error(StatusCode::INTERNAL_SERVER_ERROR, "Report parser failed"),
+        };
     let Some(id) = input["id"]
         .as_str()
         .filter(|s| valid_id(s))

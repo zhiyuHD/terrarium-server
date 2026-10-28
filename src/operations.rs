@@ -166,16 +166,16 @@ impl Store {
         let conn = self.reader()?;
         let mut statement = conn.prepare(
             "SELECT ids.id, credentials.id IS NOT NULL,
-                json_extract(boxes.entry, '$.state.name'),
+                summary.name,
                 CASE WHEN boxes.id IS NULL THEN NULL ELSE boxes.kind END,
                 boxes.score, boxes.reported_at,
-                json_extract(boxes.entry, '$.clientVersion'),
-                json_extract(boxes.entry, '$.coopanionVersion'),
-                json_extract(boxes.entry, '$.reportTransport'),
-                json_extract(boxes.entry, '$.clientSystem')
+                json_extract(summary.metadata, '$.clientVersion'),
+                json_extract(summary.metadata, '$.coopanionVersion'),
+                json_extract(summary.metadata, '$.reportTransport'),
+                json_extract(summary.metadata, '$.clientSystem')
              FROM (SELECT id FROM credentials UNION SELECT id FROM boxes) ids
              LEFT JOIN credentials ON ids.id=credentials.id
-             LEFT JOIN boxes ON ids.id=boxes.id ORDER BY ids.id",
+             LEFT JOIN boxes ON ids.id=boxes.id LEFT JOIN box_summaries summary ON summary.id=ids.id ORDER BY ids.id",
         )?;
         let rows = statement.query_map([], |r| {
             Ok((

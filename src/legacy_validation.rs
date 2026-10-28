@@ -51,9 +51,11 @@ impl LegacyValidator {
         Ok(())
     }
     pub async fn validate(&self, state: &Value) -> Result<Value> {
-        let reply = self.exchange(state).await?;
-        ensure!(reply.get("state").is_some(), "Invalid report");
-        Ok(reply["state"].clone())
+        let mut reply = self.exchange(state).await?;
+        reply
+            .as_object_mut()
+            .and_then(|object| object.remove("state"))
+            .context("Invalid report")
     }
     async fn exchange(&self, state: &Value) -> Result<Value> {
         let mut guard = self.worker.lock().await;

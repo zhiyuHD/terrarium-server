@@ -141,13 +141,14 @@ impl Store {
             use std::os::unix::fs::PermissionsExt;
             file.set_permissions(fs::Permissions::from_mode(0o600))?;
         }
-        let conn = Connection::open(&path)?;
+        let mut conn = Connection::open(&path)?;
         conn.busy_timeout(Duration::from_secs(5))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "FULL")?;
         let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
         ensure!(version <= 1, "Database schema is newer than this binary");
         conn.execute_batch("CREATE TABLE IF NOT EXISTS boxes(id TEXT PRIMARY KEY,kind TEXT NOT NULL,score REAL NOT NULL,reported_at TEXT NOT NULL,revision TEXT,entry TEXT NOT NULL,id_sort TEXT NOT NULL,search TEXT NOT NULL,plants INTEGER NOT NULL,animals INTEGER NOT NULL); CREATE INDEX IF NOT EXISTS boxes_counts ON boxes(kind,plants,animals); CREATE INDEX IF NOT EXISTS boxes_rank ON boxes(kind,score DESC,id_sort); CREATE INDEX IF NOT EXISTS boxes_recent ON boxes(kind,reported_at DESC,id_sort); CREATE TABLE IF NOT EXISTS credentials(id TEXT PRIMARY KEY,token TEXT NOT NULL); CREATE TABLE IF NOT EXISTS legacy_documents(name TEXT PRIMARY KEY,content BLOB NOT NULL); PRAGMA user_version=1;")?;
+        crate::summary_cache::initialize(&mut conn)?;
         Ok(Self {
             path,
             writer: Arc::new(Mutex::new(conn)),
@@ -293,20 +294,15 @@ impl Store {
     /// Wallet ranking is separate from ecosystem score and uses the last accepted snapshot.
     pub fn coins(&self, limit: usize, own: Option<&str>) -> Result<Value> {
         let conn = self.reader()?;
-        let mut stmt = conn.prepare("WITH wallets AS (
-            SELECT id,id_sort,reported_at,
-                json_extract(entry,'$.state.name') name,
-                json_extract(entry,'$.state.economy.earned') earned,
-                json_extract(entry,'$.state.economy.earned')-json_extract(entry,'$.state.economy.spent') coins
-            FROM boxes WHERE kind='land'
-                AND json_type(entry,'$.state.economy.earned')='integer'
-                AND json_type(entry,'$.state.economy.spent')='integer'
-                AND json_extract(entry,'$.state.economy.earned') BETWEEN 1 AND 1000000000
-                AND json_extract(entry,'$.state.economy.spent') BETWEEN 0 AND json_extract(entry,'$.state.economy.earned')
+        let mut stmt = conn.prepare(
+            "WITH wallets AS (
+            SELECT id,id_sort,reported_at,name,earned,earned-spent coins
+            FROM box_summaries WHERE kind='land' AND earned>0
         ), ranks AS (SELECT *,row_number() OVER(ORDER BY coins DESC,id_sort) position,
             rank() OVER(ORDER BY coins DESC) competitive,count(*) OVER() total FROM wallets)
         SELECT id,name,reported_at,earned,coins,position,competitive,total FROM ranks
-        WHERE position<=?1 OR id=?2 ORDER BY position")?;
+        WHERE position<=?1 OR id=?2 ORDER BY position",
+        )?;
         let rows = stmt.query_map(params![limit as i64, own], |r| {
             Ok((serde_json::json!({"id":r.get::<_,String>(0)?,"name":r.get::<_,Option<String>>(1)?,
                 "reportedAt":r.get::<_,String>(2)?,"earned":r.get::<_,i64>(3)?,"coins":r.get::<_,i64>(4)?,
@@ -338,33 +334,52 @@ impl Store {
         let total: i64 = tx.query_row("SELECT count(*) FROM boxes WHERE kind=?1", [kind], |r| {
             r.get(0)
         })?;
-        let mut stmt=tx.prepare("WITH ranks AS (SELECT id,row_number() OVER(ORDER BY score DESC,id_sort) position,rank() OVER(ORDER BY score DESC) competitive FROM boxes WHERE kind=?1) SELECT b.entry,b.score,r.position,r.competitive FROM ranks r JOIN boxes b ON b.id=r.id WHERE r.position<=?2 OR b.id=?3 ORDER BY r.position")?;
-        let rows = stmt.query_map(params![kind, limit as i64, own], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, f64>(1)?,
-                r.get::<_, i64>(2)?,
-                r.get::<_, i64>(3)?,
-            ))
-        })?;
+        let mut stmt=tx.prepare("SELECT b.id,b.score,s.name,s.parts,b.reported_at FROM boxes b JOIN box_summaries s ON s.id=b.id WHERE b.kind=?1 ORDER BY b.score DESC,b.id_sort LIMIT ?2")?;
         let mut entries = Vec::new();
         let mut mine = Value::Null;
-        for row in rows {
-            let (text, score, rank, competitive) = row?;
-            let entry: Value = serde_json::from_str(&text)?;
-            let mut summary = serde_json::json!({"rank":rank,"competitiveRank":competitive,"id":entry["id"],"score":score,"scoreParts":crate::scoring::score_parts(&entry["state"])?,"reportedAt":entry["reportedAt"]});
-            if let Some(name) = entry["state"].get("name") {
-                summary["name"] = name.clone();
+        let mut competitive = 0;
+        let mut last_score = None;
+        let mut rows = stmt.query(params![kind, limit as i64])?;
+        while let Some(row) = rows.next()? {
+            let rank = entries.len() + 1;
+            let score = row.get::<_, f64>(1)?;
+            if last_score != Some(score) {
+                competitive = rank;
+                last_score = Some(score);
             }
-            if own.is_some_and(|id| entry["id"] == id) {
+            let mut summary = serde_json::json!({"rank":rank,"competitiveRank":competitive,"id":row.get::<_,String>(0)?,"score":score,"scoreParts":serde_json::from_str::<Value>(&row.get::<_,String>(3)?)?,"reportedAt":row.get::<_,String>(4)?});
+            if let Some(name) = row.get::<_, Option<String>>(2)? {
+                summary["name"] = Value::from(name);
+            }
+            if own.is_some_and(|id| summary["id"] == id) {
                 mine = summary.clone();
             }
-            if rank <= limit as i64 {
-                entries.push(summary);
+            entries.push(summary);
+        }
+        if mine.is_null()
+            && let Some(id) = own
+        {
+            let own_row: Option<(f64,String,Option<String>,String,String)> = tx.query_row("SELECT b.score,b.id_sort,s.name,s.parts,b.reported_at FROM boxes b JOIN box_summaries s ON s.id=b.id WHERE b.kind=?1 AND b.id=?2",params![kind,id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).optional()?;
+            if let Some((score, id_sort, name, parts, reported)) = own_row {
+                let higher: i64 = tx.query_row(
+                    "SELECT count(*) FROM boxes WHERE kind=?1 AND score>?2",
+                    params![kind, score],
+                    |r| r.get(0),
+                )?;
+                let ties: i64 = tx.query_row(
+                    "SELECT count(*) FROM boxes WHERE kind=?1 AND score=?2 AND id_sort<?3",
+                    params![kind, score, id_sort],
+                    |r| r.get(0),
+                )?;
+                mine = serde_json::json!({"rank":higher+ties+1,"competitiveRank":higher+1,"id":id,"score":score,"scoreParts":serde_json::from_str::<Value>(&parts)?,"reportedAt":reported});
+                if let Some(name) = name {
+                    mine["name"] = Value::from(name);
+                }
             }
         }
         Ok(serde_json::json!({"habitat":kind,"total":total,"entries":entries,"own":mine}))
     }
+
     pub fn gallery(
         &self,
         kind: &str,
@@ -521,6 +536,7 @@ fn insert_entry(conn: &Connection, id: &str, entry: &Value) -> Result<()> {
         .context("Missing animals")?
         .len();
     conn.execute("INSERT INTO boxes VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,score=excluded.score,reported_at=excluded.reported_at,revision=excluded.revision,entry=excluded.entry,id_sort=excluded.id_sort,search=excluded.search,plants=excluded.plants,animals=excluded.animals",params![id,entry.get("kind").and_then(Value::as_str).unwrap_or("land"),score(state)?,entry["reportedAt"].as_str(),entry["reportRevision"].as_str(),serde_json::to_string(entry)?,id_sort,search,plants as i64,animals as i64])?;
+    crate::summary_cache::write(conn, id, entry, &id_sort)?;
     Ok(())
 }
 

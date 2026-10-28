@@ -12,6 +12,18 @@ pub struct Metrics {
     connections: Mutex<HashMap<String, usize>>,
     http: AtomicU64,
     websocket: AtomicU64,
+    attempts: AtomicU64,
+    waiting: AtomicU64,
+    active: AtomicU64,
+    peak: AtomicU64,
+    busy: AtomicU64,
+    buffer_busy: AtomicU64,
+    connection_busy: AtomicU64,
+    finished: AtomicU64,
+    wait_us: AtomicU64,
+    max_wait_us: AtomicU64,
+    work_us: AtomicU64,
+    max_work_us: AtomicU64,
 }
 impl Default for Metrics {
     fn default() -> Self {
@@ -20,6 +32,47 @@ impl Default for Metrics {
             connections: Mutex::new(HashMap::new()),
             http: AtomicU64::new(0),
             websocket: AtomicU64::new(0),
+            attempts: AtomicU64::new(0),
+            waiting: AtomicU64::new(0),
+            active: AtomicU64::new(0),
+            peak: AtomicU64::new(0),
+            busy: AtomicU64::new(0),
+            buffer_busy: AtomicU64::new(0),
+            connection_busy: AtomicU64::new(0),
+            finished: AtomicU64::new(0),
+            wait_us: AtomicU64::new(0),
+            max_wait_us: AtomicU64::new(0),
+            work_us: AtomicU64::new(0),
+            max_work_us: AtomicU64::new(0),
+        }
+    }
+}
+pub struct ReportTiming {
+    metrics: Arc<Metrics>,
+    started: Instant,
+    processing: Option<Instant>,
+}
+impl ReportTiming {
+    pub fn processing(&mut self) {
+        self.metrics.waiting.fetch_sub(1, Ordering::Relaxed);
+        let active = self.metrics.active.fetch_add(1, Ordering::Relaxed) + 1;
+        self.metrics.peak.fetch_max(active, Ordering::Relaxed);
+        let wait = self.started.elapsed().as_micros() as u64;
+        self.metrics.wait_us.fetch_add(wait, Ordering::Relaxed);
+        self.metrics.max_wait_us.fetch_max(wait, Ordering::Relaxed);
+        self.processing = Some(Instant::now());
+    }
+}
+impl Drop for ReportTiming {
+    fn drop(&mut self) {
+        if let Some(start) = self.processing {
+            let work = start.elapsed().as_micros() as u64;
+            self.metrics.work_us.fetch_add(work, Ordering::Relaxed);
+            self.metrics.max_work_us.fetch_max(work, Ordering::Relaxed);
+            self.metrics.finished.fetch_add(1, Ordering::Relaxed);
+            self.metrics.active.fetch_sub(1, Ordering::Relaxed);
+        } else {
+            self.metrics.waiting.fetch_sub(1, Ordering::Relaxed);
         }
     }
 }
@@ -28,6 +81,33 @@ pub struct ConnectionGuard {
     id: String,
 }
 impl Metrics {
+    pub fn report_started(self: &Arc<Self>) -> ReportTiming {
+        self.attempts.fetch_add(1, Ordering::Relaxed);
+        self.waiting.fetch_add(1, Ordering::Relaxed);
+        ReportTiming {
+            metrics: self.clone(),
+            started: Instant::now(),
+            processing: None,
+        }
+    }
+    pub fn buffer_busy(&self) {
+        self.buffer_busy.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn connection_busy(&self) {
+        self.connection_busy.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn admission_busy(&self) {
+        self.busy.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn processing_status(&self) -> Value {
+        let n = self.finished.load(Ordering::Relaxed).max(1);
+        json!({"attempted":self.attempts.load(Ordering::Relaxed),"accepted":self.accepted_reports(),
+            "waiting":self.waiting.load(Ordering::Relaxed),"active":self.active.load(Ordering::Relaxed),"peakActive":self.peak.load(Ordering::Relaxed),
+            "admissionBusy":self.busy.load(Ordering::Relaxed),"bufferBusy":self.buffer_busy.load(Ordering::Relaxed),"connectionBusy":self.connection_busy.load(Ordering::Relaxed),
+            "finished":self.finished.load(Ordering::Relaxed),"averageWaitMs":self.wait_us.load(Ordering::Relaxed) as f64/n as f64/1000.0,
+            "maxWaitMs":self.max_wait_us.load(Ordering::Relaxed) as f64/1000.0,
+            "averageProcessingMs":self.work_us.load(Ordering::Relaxed) as f64/n as f64/1000.0,"maxProcessingMs":self.max_work_us.load(Ordering::Relaxed) as f64/1000.0})
+    }
     pub fn connected(self: &Arc<Self>, id: &str) -> ConnectionGuard {
         *self
             .connections

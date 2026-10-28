@@ -9,7 +9,10 @@ use serde_json::{Value, json};
 use std::sync::LazyLock;
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 use tokio::sync::Semaphore;
 pub static REPORT_BUFFERS: LazyLock<Arc<Semaphore>> =
@@ -18,8 +21,10 @@ pub static REPORT_BUFFERS: LazyLock<Arc<Semaphore>> =
 #[derive(Clone)]
 pub struct Ingestion {
     store: Store,
-    validator: LegacyValidator,
+    validators: [LegacyValidator; 2],
+    next_validator: Arc<AtomicUsize>,
     pending: Arc<Semaphore>,
+    initial_connections: Arc<Semaphore>,
     metrics: Arc<crate::metrics::Metrics>,
     gates: Arc<Mutex<HashMap<String, CachedGate>>>,
 }
@@ -77,14 +82,26 @@ impl Ingestion {
     pub fn new(store: Store) -> Self {
         Self {
             store,
-            validator: LegacyValidator::default(),
+            validators: std::array::from_fn(|_| LegacyValidator::default()),
+            next_validator: Arc::new(AtomicUsize::new(0)),
             pending: Arc::new(Semaphore::new(4)),
+            initial_connections: Arc::new(Semaphore::new(4)),
             metrics: Arc::new(crate::metrics::Metrics::default()),
             gates: Arc::new(Mutex::new(HashMap::new())),
         }
     }
     pub async fn ready(&self) -> anyhow::Result<()> {
-        self.validator.ready().await
+        tokio::try_join!(self.validators[0].ready(), self.validators[1].ready())?;
+        Ok(())
+    }
+    pub(crate) async fn initial_connection(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(12),
+            self.initial_connections.clone().acquire_owned(),
+        )
+        .await
+        .ok()?
+        .ok()
     }
     pub fn metrics(&self) -> Arc<crate::metrics::Metrics> {
         self.metrics.clone()
@@ -162,13 +179,16 @@ impl Ingestion {
         input: &Value,
         transport: &str,
     ) -> Result<Value, ReportError> {
+        let mut timing = self.metrics.report_started();
         let _permit =
             tokio::time::timeout(std::time::Duration::from_secs(2), self.pending.acquire())
                 .await
                 .map_err(|_| {
+                    self.metrics.admission_busy();
                     ReportError::new(503, "Report processing is busy; retry after a short delay")
                 })?
                 .map_err(|_| ReportError::new(503, "Report processing stopped"))?;
+        timing.processing();
         self.enforce(id, &input["clientVersion"], transport).await?;
         for key in ["clientVersion", "coopanionVersion"] {
             if input.get(key).is_some_and(|v| !valid_version(v)) {
@@ -188,26 +208,38 @@ impl Ingestion {
             return Err(ReportError::new(400, "Invalid report metadata"));
         }
         let owned_id = id.to_owned();
-        let previous = database(self.store.clone(), move |s| s.get(&owned_id)).await?;
-        let raw = if input["kind"] == "delta" {
-            let base = previous
-                .as_ref()
-                .ok_or_else(|| ReportError::resync("Full report required"))?;
-            if input["baseRevision"] != base["reportRevision"] {
-                return Err(ReportError::resync("Full report required"));
-            }
-            if input
-                .get("baseHash")
-                .is_some_and(|h| h != &state_hash(&base["state"]))
-            {
-                return Err(ReportError::resync("Report baseline checksum mismatch"));
-            }
-            apply_changes(&base["state"], &input["changes"])
-                .map_err(|_| ReportError::new(400, "Invalid report changes"))?
-        } else {
+        let full = input["kind"] != "delta";
+        let payload = if full {
             input["state"].clone()
+        } else {
+            input["changes"].clone()
         };
-        let state = self.validator.validate(&raw).await.map_err(|e| {
+        let revision = input["baseRevision"].clone();
+        let baseline_hash = input.get("baseHash").cloned();
+        let (previous, raw) = database(self.store.clone(), move |s| {
+            let previous = s.get(&owned_id)?;
+            let prepare = || -> Result<Value, ReportError> {
+                if full {
+                    return Ok(payload);
+                }
+                let base = previous
+                    .as_ref()
+                    .ok_or_else(|| ReportError::resync("Full report required"))?;
+                if revision != base["reportRevision"] {
+                    return Err(ReportError::resync("Full report required"));
+                }
+                if baseline_hash.is_some_and(|hash| hash != state_hash(&base["state"])) {
+                    return Err(ReportError::resync("Report baseline checksum mismatch"));
+                }
+                apply_changes(&base["state"], &payload)
+                    .map_err(|_| ReportError::new(400, "Invalid report changes"))
+            };
+            Ok(prepare().map(|raw| (previous, raw)))
+        })
+        .await??;
+        let validator = &self.validators
+            [self.next_validator.fetch_add(1, Ordering::Relaxed) % self.validators.len()];
+        let state = validator.validate(&raw).await.map_err(|e| {
             ReportError::new(
                 if e.to_string() == "Invalid report" {
                     400
@@ -221,12 +253,16 @@ impl Ingestion {
                 },
             )
         })?;
-        if input
-            .get("stateHash")
-            .is_some_and(|h| h != &state_hash(&state))
-        {
-            return Err(ReportError::resync("Report state checksum mismatch"));
-        }
+        let expected = input.get("stateHash").cloned();
+        let state = tokio::task::spawn_blocking(move || {
+            if expected.is_some_and(|hash| hash != state_hash(&state)) {
+                Err(ReportError::resync("Report state checksum mismatch"))
+            } else {
+                Ok(state)
+            }
+        })
+        .await
+        .map_err(|_| ReportError::new(500, "Report checksum failed"))??;
         let now = now_ms();
         let updated = state["updatedAtMs"]
             .as_f64()
@@ -262,9 +298,9 @@ impl Ingestion {
                 entry[key] = value.clone();
             }
         }
-        let write = entry.clone();
-        let accepted = database(self.store.clone(), move |s| {
-            s.commit_entry(&write, previous.as_ref())
+        let (accepted, entry) = database(self.store.clone(), move |s| {
+            let accepted = s.commit_entry(&entry, previous.as_ref())?;
+            Ok((accepted, entry))
         })
         .await?;
         if !accepted {
@@ -298,7 +334,8 @@ impl ReportSession {
         let mut seq = 0;
         let result=async {
             let text=text.ok_or_else(||ReportError::new(400,"Text reports required"))?;
-            let input:Value=serde_json::from_str(text).map_err(|_|ReportError::new(400,"Invalid JSON"))?;
+            let text=text.to_owned();
+            let input:Value=tokio::task::spawn_blocking(move || serde_json::from_str(&text)).await.map_err(|_|ReportError::new(500,"Report parser failed"))?.map_err(|_|ReportError::new(400,"Invalid JSON"))?;
             let next=input["seq"].as_f64().filter(|n|n.fract()==0.0&&*n>self.last_seq as f64&&*n<=9_007_199_254_740_991.0).ok_or_else(||ReportError::new(400,"Invalid report sequence"))? as u64;
             seq=next; self.last_seq=seq;
             ingestion.enforce(id,&input["clientVersion"],"websocket").await?;
@@ -308,7 +345,7 @@ impl ReportSession {
             if input["kind"]=="delta"&&(self.requires_full||!input["baseRevision"].is_string()) { return Err(ReportError::resync("Full report required")); }
             let entry=ingestion.commit(id,&input,"websocket").await?;
             self.requires_full=false;
-            Ok::<Value,ReportError>(json!({"kind":"ack","seq":seq,"revision":entry["reportRevision"],"score":entry["score"],"stateHash":state_hash(&entry["state"])}))
+            Ok::<Value,ReportError>(json!({"kind":"ack","seq":seq,"revision":entry["reportRevision"],"score":entry["score"],"stateHash":if let Some(hash)=input.get("stateHash") { hash.clone() } else { let state=entry["state"].clone(); tokio::task::spawn_blocking(move || state_hash(&state)).await.map_err(|_|ReportError::new(500,"Report checksum failed"))?.into() }}))
         }.await;
         match result {
             Ok(reply) => reply,

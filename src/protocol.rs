@@ -2,7 +2,10 @@ use anyhow::{Result, bail, ensure};
 use regex::Regex;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::sync::LazyLock;
+use std::{
+    io::{self, BufWriter, Write},
+    sync::LazyLock,
+};
 pub const MAX_BYTES: usize = 8_388_608;
 pub const MAX_CHANGES: usize = 16_384;
 pub fn valid_version(value: &Value) -> bool {
@@ -44,50 +47,109 @@ pub fn valid_hash(value: &Value) -> bool {
     })
 }
 /// Matches JSON.stringify with the client's sorted-key replacer, including JS integer-key ordering.
-pub fn canonical_json(value: &Value) -> String {
+fn write_canonical(value: &Value, out: &mut impl Write) -> io::Result<()> {
     match value {
-        Value::Number(n) => {
-            let v = n.as_f64().unwrap();
-            if v == 0.0 {
-                "0".into()
+        Value::Null => out.write_all(b"null"),
+        Value::Bool(value) => out.write_all(if *value { b"true" } else { b"false" }),
+        Value::Number(number) => {
+            let n = number.as_f64().unwrap();
+            if n == 0.0 {
+                out.write_all(b"0")
             } else {
-                ryu_js::Buffer::new().format(v).to_owned()
+                out.write_all(ryu_js::Buffer::new().format(n).as_bytes())
             }
         }
-        Value::Array(a) => format!(
-            "[{}]",
-            a.iter().map(canonical_json).collect::<Vec<_>>().join(",")
-        ),
-        Value::Object(obj) => {
+        Value::String(_) => serde_json::to_writer(out, value).map_err(io::Error::other),
+        Value::Array(items) => {
+            out.write_all(b"[")?;
+            for (index, item) in items.iter().enumerate() {
+                if index != 0 {
+                    out.write_all(b",")?;
+                }
+                write_canonical(item, out)?;
+            }
+            out.write_all(b"]")
+        }
+        Value::Object(object) => {
+            out.write_all(b"{")?;
             let index = |key: &str| {
                 key.parse::<u32>()
                     .ok()
                     .filter(|n| *n < u32::MAX && n.to_string() == key)
             };
-            let mut keys: Vec<_> = obj.keys().collect();
-            keys.sort_by(|a, b| match (index(a), index(b)) {
-                (Some(a), Some(b)) => a.cmp(&b),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                _ => a.encode_utf16().cmp(b.encode_utf16()),
-            });
-            format!(
-                "{{{}}}",
-                keys.into_iter()
-                    .map(|k| format!(
-                        "{}:{}",
-                        serde_json::to_string(k).unwrap(),
-                        canonical_json(&obj[k])
-                    ))
-                    .collect::<Vec<_>>()
-                    .join(",")
-            )
+            let mut keys = Vec::new();
+            if object
+                .keys()
+                .any(|key| !key.is_ascii() || index(key).is_some())
+            {
+                keys.extend(object.keys());
+                keys.sort_by(|a, b| match (index(a), index(b)) {
+                    (Some(a), Some(b)) => a.cmp(&b),
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    _ => a.encode_utf16().cmp(b.encode_utf16()),
+                });
+            }
+            let mut field = |position: usize, key: &String| -> io::Result<()> {
+                if position != 0 {
+                    out.write_all(b",")?;
+                }
+                serde_json::to_writer(&mut *out, key).map_err(io::Error::other)?;
+                out.write_all(b":")?;
+                write_canonical(&object[key], out)
+            };
+            if keys.is_empty() {
+                for (position, key) in object.keys().enumerate() {
+                    field(position, key)?;
+                }
+            } else {
+                for (position, key) in keys.into_iter().enumerate() {
+                    field(position, key)?;
+                }
+            }
+            out.write_all(b"}")
         }
-        _ => value.to_string(),
+    }
+}
+pub fn canonical_json(value: &Value) -> String {
+    let mut bytes = Vec::new();
+    write_canonical(value, &mut bytes).unwrap();
+    String::from_utf8(bytes).unwrap()
+}
+struct HashWriter(Sha256);
+impl Write for HashWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0.update(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
     }
 }
 pub fn state_hash(value: &Value) -> String {
-    format!("{:x}", Sha256::digest(canonical_json(value).as_bytes()))
+    let mut out = BufWriter::with_capacity(8192, HashWriter(Sha256::new()));
+    write_canonical(value, &mut out).unwrap();
+    out.flush().unwrap();
+    format!(
+        "{:x}",
+        out.into_inner()
+            .unwrap_or_else(|_| unreachable!())
+            .0
+            .finalize()
+    )
+}
+struct SizeWriter(usize);
+impl Write for SizeWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0 += bytes.len();
+        if self.0 > MAX_BYTES {
+            return Err(io::Error::other("Report too large"));
+        }
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 pub fn apply_changes(base: &Value, changes: &Value) -> Result<Value> {
     let changes = changes
@@ -171,10 +233,7 @@ pub fn apply_changes(base: &Value, changes: &Value) -> Result<Value> {
             _ => bail!("Missing report path"),
         }
     }
-    ensure!(
-        canonical_json(&state).len() <= MAX_BYTES,
-        "Report too large"
-    );
+    write_canonical(&state, &mut SizeWriter(0))?;
     Ok(state)
 }
 fn array_index(key: &str) -> Option<usize> {

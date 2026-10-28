@@ -22,9 +22,12 @@ pub fn logo(version: &str) -> &'static str {
 }
 pub fn page(version: &str, release: Option<&str>) -> String {
     crate::assets::pin_public(
-        &include_str!("../web/index.html")
-            .replace("<!-- RELEASE_LOGO -->", logo(version))
-            .replace("<!-- LOGO_VERSION -->", version),
+        &crate::support::page(
+            include_str!("../web/index.html")
+                .replace("<!-- RELEASE_LOGO -->", logo(version))
+                .replace("<!-- LOGO_VERSION -->", version)
+                .as_str(),
+        ),
         release,
     )
 }

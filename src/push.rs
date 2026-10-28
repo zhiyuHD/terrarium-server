@@ -79,23 +79,41 @@ pub async fn upgrade(
     let opt_in = headers
         .get("x-cortico-protocol-notices")
         .is_some_and(|v| v == "1");
+    let gate = match ingestion.gate(&id, &version, "websocket").await {
+        Ok(gate) => gate,
+        Err(error) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(error.body())).into_response();
+        }
+    };
+    // Pace initial snapshots before the upgrade, while waiting requests contain no report body.
+    let initial = if gate.rejection.is_none() {
+        match ingestion.initial_connection().await {
+            Some(permit) => Some(permit),
+            None => {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(json!({"error":"Connection initialization is busy; retry shortly"})),
+                )
+                    .into_response();
+            }
+        }
+    } else {
+        None
+    };
     ws.max_message_size(MAX_BYTES)
         .max_frame_size(MAX_BYTES)
-        .on_upgrade(move |socket| connection(socket, ingestion, id, version, opt_in))
+        .on_upgrade(move |socket| connection(socket, ingestion, id, gate, opt_in, initial))
 }
 async fn connection(
     socket: WebSocket,
     ingestion: Ingestion,
     id: String,
-    version: Value,
+    gate: crate::policy::Gate,
     opt_in: bool,
+    mut initial: Option<tokio::sync::OwnedSemaphorePermit>,
 ) {
     let _connection = ingestion.metrics().connected(&id);
     let (mut sink, mut stream) = socket.split();
-    let gate = match ingestion.gate(&id, &version, "websocket").await {
-        Ok(gate) => gate,
-        Err(_) => return,
-    };
     if opt_in
         && let Some(notice) = gate.notice
         && sink
@@ -112,11 +130,13 @@ async fn connection(
     let (controls, mut commands) = mpsc::channel(2);
     let alive = Arc::new(AtomicBool::new(true));
     let reader_alive = alive.clone();
+    let metrics = ingestion.metrics();
     let reader = tokio::spawn(async move {
         while let Some(Ok(message)) = stream.next().await {
             match message {
                 Message::Text(_) | Message::Binary(_) => {
                     let Ok(permit) = permits.clone().try_acquire_owned() else {
+                        metrics.connection_busy();
                         let _ = controls
                             .send(Message::Close(Some(CloseFrame {
                                 code: 1008,
@@ -134,6 +154,7 @@ async fn connection(
                         .clone()
                         .try_acquire_many_owned(bytes.max(1) as u32)
                     else {
+                        metrics.buffer_busy();
                         let _ = controls
                             .send(Message::Close(Some(CloseFrame {
                                 code: 1013,
@@ -167,9 +188,14 @@ async fn connection(
         tokio::time::Instant::now() + Duration::from_secs(30),
         Duration::from_secs(30),
     );
+    let first_deadline = tokio::time::sleep(Duration::from_secs(10));
+    tokio::pin!(first_deadline);
     loop {
         tokio::select! {
             biased;
+            _=&mut first_deadline, if initial.is_some()=>{
+                let _=sink.send(Message::Close(Some(CloseFrame{code:1008,reason:"Initial report timeout".into()}))).await;break;
+            },
             command=commands.recv()=>{
                 let Some(command)=command else{break};let close=matches!(command,Message::Close(_));
                 if sink.send(command).await.is_err()||close {break;}
@@ -182,6 +208,7 @@ async fn connection(
                 let text=match &message {Message::Text(t)=>Some(t.as_str()),_=>None};
                 let reply=session.receive(&ingestion,&id,text).await;
                 if sink.send(Message::Text(reply.to_string().into())).await.is_err(){break;}
+                initial.take();
             }
         }
     }
