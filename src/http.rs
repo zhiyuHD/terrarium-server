@@ -47,7 +47,18 @@ pub fn router(app: App) -> Router {
         )
         .route(
             "/forum",
-            get(|| async { Html(crate::support::page(include_str!("../web/forum.html"))) }),
+            get(|| async {
+                Html(crate::support::page(
+                    &include_str!("../web/forum.html").replace(
+                        "<!-- FORUM_MARKDOWN -->",
+                        concat!(
+                            "<script>",
+                            include_str!("../web/forum-markdown.js"),
+                            "</script>"
+                        ),
+                    ),
+                ))
+            }),
         )
         .route("/api/forum/status", get(crate::forum::status))
         .route("/api/forum/{*path}", any(crate::forum::handle))

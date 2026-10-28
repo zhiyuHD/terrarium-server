@@ -1,4 +1,4 @@
-<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/report_writer.rs, src/summary_cache.rs, src/support.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, web/forum.html, web/admin/index.html, web/admin/client.js, src/forum.rs, src/forum_recommendation.rs, src/forum_bridge.rs, src/forum_digest.rs, src/presentation.rs, src/story.rs, src/story_text.rs, src/story_seedbed.rs, reading/worker.py, src/photos.rs, src/photo_cache.rs, src/photo_notices.rs, photo/render.mjs, photo/build.mjs -->
+<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/report_writer.rs, src/summary_cache.rs, src/support.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, web/forum.html, forum-markdown/client.js, forum-markdown/build.mjs, web/admin/index.html, web/admin/client.js, src/forum.rs, src/forum_recommendation.rs, src/forum_bridge.rs, src/forum_digest.rs, src/presentation.rs, src/story.rs, src/story_text.rs, src/story_seedbed.rs, reading/worker.py, src/photos.rs, src/photo_cache.rs, src/photo_notices.rs, photo/render.mjs, photo/build.mjs -->
 # terrarium-server
 
 生态箱独立服务端，生产 HTTP/WS 与存储使用 Rust + SQLite。兼容现有 World 的 HTTP/WS 协议与 TS 存档，可通过 Native 原子发布控制器运行。公共接口仅监听回环地址，管理台使用独立私网端口。
@@ -6,6 +6,8 @@
 提交队列、合批落盘与性能指标见 [report-processing.md](docs/report-processing.md)。公开页面的赞赏弹窗及关闭规则见 [support-dialog.md](docs/support-dialog.md)。
 
 已实现：
+
+- 论坛帖子和回复支持 Markdown 标题、列表、引用、代码、表格、链接及图片。原始 HTML 转义，链接限制安全协议。
 
 - 排行榜、摘要、分页观察页、单箱状态与按需回放读取。历史发布资源按 release ID 读取，打开的页面保留对应版本的渲染资源。
 - 自动分配 ID/token，兼容旧 ID 注册，Bearer 鉴权，HTTP 完整上报和 WS 完整/增量上报。提交上限 8 MiB，每连接最多 2 个待处理报告，全局原始报告缓冲 24 MiB、同时处理最多 8 个报告、两个兼容验证进程，WS 每 30 秒检查心跳。

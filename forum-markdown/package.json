@@ -1,0 +1,14 @@
+{
+  "name": "terrarium-forum-markdown",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "markdown-it": "15.0.3"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1"
+  }
+}
