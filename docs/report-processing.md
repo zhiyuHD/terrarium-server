@@ -10,3 +10,5 @@ CPU-intensive parsing, delta application and checksum verification run outside t
 Ecology rankings use indexed top-row reads and indexed own-rank counts. Coin rankings and private box statistics read the compact cache. Two concurrent leaderboard reads limit blocking-thread contention; response encoding also runs on the blocking pool. Legacy full-state leaderboard responses retain their shape.
 
 `GET /health` includes aggregate reportProcessing counters: active/waiting requests, admission/buffer/connection-limit rejections, accepted reports and cumulative mean/max waiting and processing times. Counters reset on restart. Only committed reports count as accepted; busy replies do not acknowledge a save.
+
+Gallery metadata is read through a covering index, so searching or ranking does not traverse snapshot overflow pages. Empty searches reuse count totals. Legacy ranked endpoints select habitat-specific or global rank indexes before fetching their first 100 snapshots. A sixteen-thread blocking pool leaves headroom for metadata reads while report writes wait on SQLite. Health metrics include policy, prepare, validate, checksum and commit stage timings.

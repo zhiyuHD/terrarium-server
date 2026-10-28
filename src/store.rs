@@ -147,7 +147,7 @@ impl Store {
         conn.pragma_update(None, "synchronous", "FULL")?;
         let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
         ensure!(version <= 1, "Database schema is newer than this binary");
-        conn.execute_batch("CREATE TABLE IF NOT EXISTS boxes(id TEXT PRIMARY KEY,kind TEXT NOT NULL,score REAL NOT NULL,reported_at TEXT NOT NULL,revision TEXT,entry TEXT NOT NULL,id_sort TEXT NOT NULL,search TEXT NOT NULL,plants INTEGER NOT NULL,animals INTEGER NOT NULL); CREATE INDEX IF NOT EXISTS boxes_counts ON boxes(kind,plants,animals); CREATE INDEX IF NOT EXISTS boxes_rank ON boxes(kind,score DESC,id_sort); CREATE INDEX IF NOT EXISTS boxes_recent ON boxes(kind,reported_at DESC,id_sort); CREATE TABLE IF NOT EXISTS credentials(id TEXT PRIMARY KEY,token TEXT NOT NULL); CREATE TABLE IF NOT EXISTS legacy_documents(name TEXT PRIMARY KEY,content BLOB NOT NULL); PRAGMA user_version=1;")?;
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS boxes(id TEXT PRIMARY KEY,kind TEXT NOT NULL,score REAL NOT NULL,reported_at TEXT NOT NULL,revision TEXT,entry TEXT NOT NULL,id_sort TEXT NOT NULL,search TEXT NOT NULL,plants INTEGER NOT NULL,animals INTEGER NOT NULL); CREATE INDEX IF NOT EXISTS boxes_counts ON boxes(kind,plants,animals); CREATE INDEX IF NOT EXISTS boxes_gallery_metadata ON boxes(kind,score DESC,id_sort,id,reported_at,search); CREATE INDEX IF NOT EXISTS boxes_global_rank ON boxes(score DESC,id_sort); CREATE INDEX IF NOT EXISTS boxes_rank ON boxes(kind,score DESC,id_sort); CREATE INDEX IF NOT EXISTS boxes_recent ON boxes(kind,reported_at DESC,id_sort); CREATE TABLE IF NOT EXISTS credentials(id TEXT PRIMARY KEY,token TEXT NOT NULL); CREATE TABLE IF NOT EXISTS legacy_documents(name TEXT PRIMARY KEY,content BLOB NOT NULL); PRAGMA user_version=1;")?;
         crate::summary_cache::initialize(&mut conn)?;
         Ok(Self {
             path,
@@ -279,10 +279,12 @@ impl Store {
     }
     pub fn ranked(&self, kind: Option<&str>) -> Result<Vec<Value>> {
         let conn = self.reader()?;
-        let mut stmt = conn.prepare(
-            "SELECT entry,score FROM boxes WHERE (?1 IS NULL OR kind=?1) ORDER BY score DESC,id_sort LIMIT 100",
-        )?;
-        let rows = stmt.query_map([kind], |r| {
+        let mut stmt = conn.prepare(if kind.is_some() {
+            "SELECT entry,score FROM boxes WHERE kind=?1 ORDER BY score DESC,id_sort LIMIT 100"
+        } else {
+            "SELECT entry,score FROM boxes ORDER BY score DESC,id_sort LIMIT 100"
+        })?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(kind), |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?))
         })?;
         rows.map(|r| {
@@ -361,7 +363,7 @@ impl Store {
         if mine.is_null()
             && let Some(id) = own
         {
-            let own_row: Option<(f64,String,Option<String>,String,String)> = tx.query_row("SELECT b.score,b.id_sort,s.name,s.parts,b.reported_at FROM boxes b JOIN box_summaries s ON s.id=b.id WHERE b.kind=?1 AND b.id=?2",params![kind,id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).optional()?;
+            let own_row: Option<(f64,String,Option<String>,String,String)> = tx.query_row("SELECT b.score,s.id_sort,s.name,s.parts,b.reported_at FROM boxes b JOIN box_summaries s ON s.id=b.id WHERE b.kind=?1 AND b.id=?2",params![kind,id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).optional()?;
             if let Some((score, id_sort, name, parts, reported)) = own_row {
                 let higher: i64 = tx.query_row(
                     "SELECT count(*) FROM boxes WHERE kind=?1 AND score>?2",
@@ -393,11 +395,15 @@ impl Store {
         let mut conn = self.reader()?;
         let tx = conn.transaction()?;
         let counts:(i64,i64,i64)=tx.query_row("SELECT count(*),coalesce(sum(plants),0),coalesce(sum(animals),0) FROM boxes WHERE kind=?1",[kind],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
-        let total: i64 = tx.query_row(
-            "SELECT count(*) FROM boxes WHERE kind=?1 AND instr(search,?2)>0",
+        let total: i64 = if query.is_empty() {
+            counts.0
+        } else {
+            tx.query_row(
+            "SELECT count(*) FROM boxes INDEXED BY boxes_gallery_metadata WHERE kind=?1 AND instr(search,?2)>0",
             params![kind, query.to_lowercase()],
             |r| r.get(0),
-        )?;
+        )?
+        };
         let pages = (total as usize).div_ceil(size).max(1);
         let page = requested.min(pages);
         let order = if recent {
@@ -406,7 +412,7 @@ impl Store {
             "score DESC,id_sort"
         };
         let sql = format!(
-            "WITH ranked AS (SELECT id,score,id_sort,reported_at,search,row_number() OVER(ORDER BY score DESC,id_sort) rank FROM boxes WHERE kind=?1), page AS MATERIALIZED (SELECT id,score,rank,row_number() OVER(ORDER BY {order}) page_order FROM ranked WHERE instr(search,?2)>0 ORDER BY {order} LIMIT ?3 OFFSET ?4) SELECT boxes.entry,page.score,page.rank FROM page JOIN boxes ON boxes.id=page.id ORDER BY page.page_order"
+            "WITH ranked AS (SELECT id,score,id_sort,reported_at,search,row_number() OVER(ORDER BY score DESC,id_sort) rank FROM boxes INDEXED BY boxes_gallery_metadata WHERE kind=?1), page AS MATERIALIZED (SELECT id,score,rank,row_number() OVER(ORDER BY {order}) page_order FROM ranked WHERE instr(search,?2)>0 ORDER BY {order} LIMIT ?3 OFFSET ?4) SELECT boxes.entry,page.score,page.rank FROM page JOIN boxes ON boxes.id=page.id ORDER BY page.page_order"
         );
         let mut stmt = tx.prepare(&sql)?;
         let entries = stmt

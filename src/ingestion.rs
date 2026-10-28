@@ -179,7 +179,9 @@ impl Ingestion {
                 })?
                 .map_err(|_| ReportError::new(503, "Report processing stopped"))?;
         timing.processing();
+        let stage = std::time::Instant::now();
         self.enforce(id, &input["clientVersion"], transport).await?;
+        self.metrics.stage(0, stage.elapsed());
         for key in ["clientVersion", "coopanionVersion"] {
             if input.get(key).is_some_and(|v| !valid_version(v)) {
                 return Err(ReportError::new(400, "Invalid report metadata"));
@@ -197,6 +199,7 @@ impl Ingestion {
         {
             return Err(ReportError::new(400, "Invalid report metadata"));
         }
+        let stage = std::time::Instant::now();
         let owned_id = id.to_owned();
         let full = input["kind"] != "delta";
         let payload = if full {
@@ -227,6 +230,8 @@ impl Ingestion {
             Ok(prepare().map(|raw| (previous, raw)))
         })
         .await??;
+        self.metrics.stage(1, stage.elapsed());
+        let stage = std::time::Instant::now();
         let validator = &self.validators
             [self.next_validator.fetch_add(1, Ordering::Relaxed) % self.validators.len()];
         let state = validator.validate(&raw).await.map_err(|e| {
@@ -243,6 +248,8 @@ impl Ingestion {
                 },
             )
         })?;
+        self.metrics.stage(2, stage.elapsed());
+        let stage = std::time::Instant::now();
         let expected = input.get("stateHash").cloned();
         let state = tokio::task::spawn_blocking(move || {
             if expected.is_some_and(|hash| hash != state_hash(&state)) {
@@ -253,6 +260,8 @@ impl Ingestion {
         })
         .await
         .map_err(|_| ReportError::new(500, "Report checksum failed"))??;
+        self.metrics.stage(3, stage.elapsed());
+        let stage = std::time::Instant::now();
         let now = now_ms();
         let updated = state["updatedAtMs"]
             .as_f64()
@@ -293,6 +302,7 @@ impl Ingestion {
             Ok((accepted, entry))
         })
         .await?;
+        self.metrics.stage(4, stage.elapsed());
         if !accepted {
             return Err(ReportError::resync(
                 "Concurrent report requires resynchronization",
