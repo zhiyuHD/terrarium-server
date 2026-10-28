@@ -24,7 +24,6 @@ pub struct Ingestion {
     validators: [LegacyValidator; 2],
     next_validator: Arc<AtomicUsize>,
     pending: Arc<Semaphore>,
-    initial_connections: Arc<Semaphore>,
     metrics: Arc<crate::metrics::Metrics>,
     gates: Arc<Mutex<HashMap<String, CachedGate>>>,
 }
@@ -85,7 +84,6 @@ impl Ingestion {
             validators: std::array::from_fn(|_| LegacyValidator::default()),
             next_validator: Arc::new(AtomicUsize::new(0)),
             pending: Arc::new(Semaphore::new(4)),
-            initial_connections: Arc::new(Semaphore::new(4)),
             metrics: Arc::new(crate::metrics::Metrics::default()),
             gates: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -93,15 +91,6 @@ impl Ingestion {
     pub async fn ready(&self) -> anyhow::Result<()> {
         tokio::try_join!(self.validators[0].ready(), self.validators[1].ready())?;
         Ok(())
-    }
-    pub(crate) async fn initial_connection(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
-        tokio::time::timeout(
-            std::time::Duration::from_secs(12),
-            self.initial_connections.clone().acquire_owned(),
-        )
-        .await
-        .ok()?
-        .ok()
     }
     pub fn metrics(&self) -> Arc<crate::metrics::Metrics> {
         self.metrics.clone()

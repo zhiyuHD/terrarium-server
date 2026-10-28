@@ -1,7 +1,7 @@
 <!-- Owner: ../src/summary_cache.rs, ../src/ingestion.rs, ../src/protocol.rs, ../src/metrics.rs, ../src/http.rs -->
 # Report processing
 
-Supported WebSocket connections wait for one of four initial-snapshot slots before upgrade. The slot is released after the first response; silent connections expire after ten seconds, and upgrade admission waits at most twelve seconds. This paces reconnect bursts before large bodies arrive. Obsolete-client notices bypass these slots. Reports retain four active processing slots, a two-second admission deadline and a shared 24 MiB raw-buffer budget. HTTP reserves received bytes rather than reserving its eight-MiB maximum for every request. WebSocket bounds and legacy HTTP policy responses remain compatible. Two persistent Node workers provide the temporary legacy-validation fallback; cancelling a request still disposes its worker before another request can read it.
+Reports retain four active processing slots, a two-second admission deadline and a shared 24 MiB raw-buffer budget. HTTP reserves received bytes rather than reserving its eight-MiB maximum for every request. WebSocket bounds and legacy HTTP policy responses remain compatible. Two persistent Node workers provide the temporary legacy-validation fallback; cancelling a request still disposes its worker before another request can read it.
 
 CPU-intensive parsing, delta application and checksum verification run outside the Tokio executor. Canonical JSON writes to a buffered SHA-256 sink and a size-counting sink, preserving ECMAScript numbers, UTF-16 key sorting and integer-index ordering. Acknowledgments reuse an already verified client checksum. Validated state and committed entry ownership move between stages without cloning full histories.
 
