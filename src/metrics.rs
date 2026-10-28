@@ -25,6 +25,9 @@ pub struct Metrics {
     work_us: AtomicU64,
     max_work_us: AtomicU64,
     stages: [StageTiming; 5],
+    write_batches: AtomicU64,
+    batch_reports: AtomicU64,
+    max_batch: AtomicU64,
 }
 impl Default for Metrics {
     fn default() -> Self {
@@ -46,6 +49,9 @@ impl Default for Metrics {
             work_us: AtomicU64::new(0),
             max_work_us: AtomicU64::new(0),
             stages: std::array::from_fn(|_| StageTiming::default()),
+            write_batches: AtomicU64::new(0),
+            batch_reports: AtomicU64::new(0),
+            max_batch: AtomicU64::new(0),
         }
     }
 }
@@ -107,6 +113,12 @@ impl Metrics {
     pub fn admission_busy(&self) {
         self.busy.fetch_add(1, Ordering::Relaxed);
     }
+    pub fn committed_batch(&self, reports: usize) {
+        self.write_batches.fetch_add(1, Ordering::Relaxed);
+        self.batch_reports
+            .fetch_add(reports as u64, Ordering::Relaxed);
+        self.max_batch.fetch_max(reports as u64, Ordering::Relaxed);
+    }
     pub fn stage(&self, index: usize, elapsed: std::time::Duration) {
         let stage = &self.stages[index];
         let us = elapsed.as_micros() as u64;
@@ -117,7 +129,7 @@ impl Metrics {
     pub fn processing_status(&self) -> Value {
         let n = self.finished.load(Ordering::Relaxed).max(1);
         let stages = ["policy","prepare","validate","checksum","commit"].iter().enumerate().map(|(i,name)| {let s=&self.stages[i];let count=s.count.load(Ordering::Relaxed);json!({"stage":name,"count":count,"meanMs":s.total.load(Ordering::Relaxed) as f64/count.max(1) as f64/1000.0,"maxMs":s.max.load(Ordering::Relaxed) as f64/1000.0})}).collect::<Vec<_>>();
-        json!({"stages":stages,"attempted":self.attempts.load(Ordering::Relaxed),"accepted":self.accepted_reports(),
+        json!({"writeBatches":self.write_batches.load(Ordering::Relaxed),"meanReportsPerBatch":self.batch_reports.load(Ordering::Relaxed) as f64/self.write_batches.load(Ordering::Relaxed).max(1) as f64,"maxReportsPerBatch":self.max_batch.load(Ordering::Relaxed),"stages":stages,"attempted":self.attempts.load(Ordering::Relaxed),"accepted":self.accepted_reports(),
             "waiting":self.waiting.load(Ordering::Relaxed),"active":self.active.load(Ordering::Relaxed),"peakActive":self.peak.load(Ordering::Relaxed),
             "admissionBusy":self.busy.load(Ordering::Relaxed),"bufferBusy":self.buffer_busy.load(Ordering::Relaxed),"connectionBusy":self.connection_busy.load(Ordering::Relaxed),
             "finished":self.finished.load(Ordering::Relaxed),"averageWaitMs":self.wait_us.load(Ordering::Relaxed) as f64/n as f64/1000.0,

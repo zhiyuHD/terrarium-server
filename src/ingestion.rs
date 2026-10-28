@@ -2,8 +2,9 @@ use crate::{
     legacy_validation::LegacyValidator,
     policy::{Gate, iso},
     protocol::{apply_changes, state_hash, valid_client_system, valid_hash, valid_version},
+    report_writer::{ReportWriter, WriteError},
     scoring::score,
-    store::{Store, random_hex},
+    store::{ReportWrite, Store, random_hex},
 };
 use serde_json::{Value, json};
 use std::sync::LazyLock;
@@ -22,6 +23,7 @@ pub static REPORT_BUFFERS: LazyLock<Arc<Semaphore>> =
 #[derive(Clone)]
 pub struct Ingestion {
     store: Store,
+    writer: ReportWriter,
     validators: [LegacyValidator; 2],
     next_validator: Arc<AtomicUsize>,
     pending: Arc<Semaphore>,
@@ -80,12 +82,15 @@ pub fn now_ms() -> i64 {
 }
 impl Ingestion {
     pub fn new(store: Store) -> Self {
+        let metrics = Arc::new(crate::metrics::Metrics::default());
+        let writer = ReportWriter::new(store.clone(), metrics.clone());
         Self {
+            writer,
             store,
             validators: std::array::from_fn(|_| LegacyValidator::default()),
             next_validator: Arc::new(AtomicUsize::new(0)),
             pending: Arc::new(Semaphore::new(REPORT_CONCURRENCY)),
-            metrics: Arc::new(crate::metrics::Metrics::default()),
+            metrics,
             gates: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -291,17 +296,28 @@ impl Ingestion {
             }
         }
         let points = score(&state).map_err(|_| ReportError::new(400, "Invalid report"))?;
-        let mut entry = json!({"id":id,"kind":kind,"state":state,"reportTransport":transport,"score":points,"reportedAt":iso(now),"reportRevision":random_hex(16)});
+        let mut entry = json!({"id":id,"kind":kind,"reportTransport":transport,"score":points,"reportedAt":iso(now),"reportRevision":random_hex(16)});
+        entry["state"] = state;
         for key in ["phase", "clientVersion", "coopanionVersion", "clientSystem"] {
             if let Some(value) = input.get(key) {
                 entry[key] = value.clone();
             }
         }
-        let (accepted, entry) = database(self.store.clone(), move |s| {
-            let accepted = s.commit_entry(&entry, previous.as_ref())?;
-            Ok((accepted, entry))
-        })
-        .await?;
+        let expected = previous
+            .as_ref()
+            .map(|e| e["reportRevision"].as_str().map(str::to_owned));
+        drop(previous);
+        let (accepted, entry) = self
+            .writer
+            .write(ReportWrite { entry, expected })
+            .await
+            .map_err(|error| match error {
+                WriteError::Busy => {
+                    self.metrics.admission_busy();
+                    ReportError::new(503, "Report writer queue is busy; retry shortly")
+                }
+                WriteError::Database => ReportError::new(500, "Database operation failed"),
+            })?;
         self.metrics.stage(4, stage.elapsed());
         if !accepted {
             return Err(ReportError::resync(

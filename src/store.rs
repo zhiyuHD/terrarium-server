@@ -28,6 +28,10 @@ pub struct Store {
     path: PathBuf,
     writer: Arc<Mutex<Connection>>,
 }
+pub(crate) struct ReportWrite {
+    pub entry: Value,
+    pub expected: Option<Option<String>>,
+}
 pub struct LegacySnapshot {
     documents: BTreeMap<String, Vec<u8>>,
     boxes: BTreeMap<String, Value>,
@@ -200,21 +204,64 @@ impl Store {
         let id = entry["id"].as_str().context("Invalid ID")?;
         validate_entry(id, entry)?;
         let serialized = serde_json::to_string(entry)?;
+        let expected = previous.map(|e| e["reportRevision"].as_str().map(str::to_owned));
+        self.transaction(|tx| self.commit_prepared(tx, entry, &expected, &serialized))
+    }
+    fn commit_prepared(
+        &self,
+        tx: &Connection,
+        entry: &Value,
+        expected: &Option<Option<String>>,
+        serialized: &str,
+    ) -> Result<bool> {
+        let id = entry["id"].as_str().context("Invalid ID")?;
+        let current: Option<Option<String>> = tx
+            .query_row("SELECT revision FROM boxes WHERE id=?1", [id], |r| r.get(0))
+            .optional()?;
+        if current != *expected {
+            return Ok(false);
+        }
+        insert_serialized_entry(tx, id, entry, serialized)?;
+        crate::story::on_report(self, tx, entry)?;
+        tx.execute(
+            "DELETE FROM legacy_documents WHERE name='leaderboard.json'",
+            [],
+        )?;
+        Ok(true)
+    }
+    pub(crate) fn commit_reports(
+        &self,
+        reports: &[ReportWrite],
+    ) -> Result<Vec<Result<bool, String>>> {
+        let prepared: Vec<_> = reports
+            .iter()
+            .map(|report| -> Result<String, String> {
+                let id = report.entry["id"]
+                    .as_str()
+                    .ok_or_else(|| "Invalid ID".to_owned())?;
+                validate_entry(id, &report.entry).map_err(|e| e.to_string())?;
+                serde_json::to_string(&report.entry).map_err(|e| e.to_string())
+            })
+            .collect();
         self.transaction(|tx| {
-            let current: Option<Option<String>> = tx
-                .query_row("SELECT revision FROM boxes WHERE id=?1", [id], |r| r.get(0))
-                .optional()?;
-            let expected = previous.map(|e| e["reportRevision"].as_str().map(str::to_owned));
-            if current != expected {
-                return Ok(false);
+            let mut results = Vec::with_capacity(reports.len());
+            for (report, serialized) in reports.iter().zip(&prepared) {
+                let serialized = match serialized {
+                    Ok(text) => text,
+                    Err(error) => {
+                        results.push(Err(error.clone()));
+                        continue;
+                    }
+                };
+                tx.execute_batch("SAVEPOINT report_write")?;
+                let result = self.commit_prepared(tx, &report.entry, &report.expected, serialized);
+                if result.is_err() {
+                    tx.execute_batch("ROLLBACK TO report_write")?;
+                }
+                tx.execute_batch("RELEASE report_write")?;
+                results.push(result.map_err(|e| e.to_string()));
             }
-            insert_serialized_entry(tx, id, entry, &serialized)?;
-            crate::story::on_report(self, tx, entry)?;
-            tx.execute(
-                "DELETE FROM legacy_documents WHERE name='leaderboard.json'",
-                [],
-            )?;
-            Ok(true)
+            Ok(results)
         })
     }
     pub fn import(&self, snapshot: LegacySnapshot) -> Result<()> {
@@ -628,4 +675,54 @@ pub(crate) fn scene_entry(entry: &Value) -> Value {
         result["phase"] = phase.clone();
     }
     result
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+    use serde_json::json;
+    fn report(id: &str) -> ReportWrite {
+        let state: Value =
+            serde_json::from_str::<Value>(include_str!("../tests/fixtures/reports.json")).unwrap()
+                ["land"]
+                .clone();
+        ReportWrite {
+            entry: json!({"id":id,"kind":"land","state":state,"phase":"day","reportedAt":"2026-10-28T00:00:00Z","reportRevision":"fixture"}),
+            expected: None,
+        }
+    }
+    #[test]
+    fn failed_item_rolls_back_its_snapshot_and_cache_without_rejecting_other_items() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let store = Store::open(dir.path().join("data.sqlite")).unwrap();
+        store.writer().unwrap().execute_batch("CREATE TRIGGER reject_one BEFORE INSERT ON box_summaries WHEN new.id='garden-bad' BEGIN SELECT RAISE(ABORT,'fixture failure'); END;").unwrap();
+        let result = store
+            .commit_reports(&[
+                report("garden-first"),
+                report("garden-bad"),
+                report("garden-last"),
+            ])
+            .unwrap();
+        assert!(matches!(result[0], Ok(true)));
+        assert!(result[1].is_err());
+        assert!(matches!(result[2], Ok(true)));
+        assert!(store.get("garden-bad").unwrap().is_none());
+        assert!(store.get("garden-first").unwrap().is_some());
+        assert!(store.get("garden-last").unwrap().is_some());
+        assert_eq!(store.summary("land", 20, None).unwrap()["total"], 2);
+    }
+    #[test]
+    fn a_deferred_commit_failure_rejects_the_whole_batch_and_persists_no_snapshots() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let store = Store::open(dir.path().join("data.sqlite")).unwrap();
+        store.writer().unwrap().execute_batch("PRAGMA foreign_keys=ON;CREATE TABLE fixture_parent(id INTEGER PRIMARY KEY);CREATE TABLE fixture_guard(id TEXT,missing INTEGER REFERENCES fixture_parent(id) DEFERRABLE INITIALLY DEFERRED);CREATE TRIGGER fail_commit AFTER INSERT ON boxes BEGIN INSERT INTO fixture_guard VALUES(new.id,1);END;").unwrap();
+        assert!(
+            store
+                .commit_reports(&[report("garden-first"), report("garden-last")])
+                .is_err()
+        );
+        assert!(store.get("garden-first").unwrap().is_none());
+        assert!(store.get("garden-last").unwrap().is_none());
+        assert_eq!(store.summary("land", 20, None).unwrap()["total"], 0);
+    }
 }

@@ -1,4 +1,4 @@
-<!-- Owner: ../src/summary_cache.rs, ../src/ingestion.rs, ../src/protocol.rs, ../src/metrics.rs, ../src/http.rs -->
+<!-- Owner: ../src/report_writer.rs, ../src/store.rs, ../src/summary_cache.rs, ../src/ingestion.rs, ../src/protocol.rs, ../src/metrics.rs, ../src/http.rs -->
 # Report processing
 
 Reports retain eight active processing slots, a two-second admission deadline and a shared 24 MiB raw-buffer budget. HTTP reserves received bytes rather than reserving its eight-MiB maximum for every request. WebSocket scratch read/write buffers are 8 KiB per direction with a 64 KiB write-buffer ceiling; the eight-MiB frame/message limits remain unchanged. Legacy HTTP policy responses remain compatible. Two persistent Node workers provide the temporary legacy-validation fallback; cancelling a request still disposes its worker before another request can read it.
@@ -12,3 +12,5 @@ Ecology rankings use indexed top-row reads and indexed own-rank counts. Coin ran
 `GET /health` includes aggregate reportProcessing counters: active/waiting requests, admission/buffer/connection-limit rejections, accepted reports and cumulative mean/max waiting and processing times. Counters reset on restart. Only committed reports count as accepted; busy replies do not acknowledge a save.
 
 Gallery metadata is read through a covering index, so searching or ranking does not traverse snapshot overflow pages. Empty searches reuse count totals. Legacy ranked endpoints select habitat-specific or global rank indexes before fetching their first 100 snapshots. A sixteen-thread blocking pool leaves headroom for metadata reads while report writes wait on SQLite. Health metrics include policy, prepare, validate, checksum and commit stage timings.
+
+A dedicated report writer drains already queued reports into batches of at most eight, with no timer waiting for a batch to fill. The queue is bounded to eight entries. Each report uses a savepoint, so an individual write failure rolls back its snapshot, cache and story changes without discarding other valid reports. The outer SQLite transaction commits with synchronous=FULL before any result is sent back. Failure of the outer commit rejects every report in that batch. Health includes committed batch counts and mean/max reports per batch.

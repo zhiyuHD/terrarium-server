@@ -1,12 +1,14 @@
-<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, web/forum.html, web/admin/index.html, web/admin/client.js, src/forum.rs, src/forum_recommendation.rs, src/forum_bridge.rs, src/forum_digest.rs, src/presentation.rs, src/story.rs, src/story_text.rs, src/story_seedbed.rs, reading/worker.py, src/photos.rs, src/photo_cache.rs, src/photo_notices.rs, photo/render.mjs, photo/build.mjs -->
+<!-- Owner: src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/report_writer.rs, src/summary_cache.rs, src/support.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, web/forum.html, web/admin/index.html, web/admin/client.js, src/forum.rs, src/forum_recommendation.rs, src/forum_bridge.rs, src/forum_digest.rs, src/presentation.rs, src/story.rs, src/story_text.rs, src/story_seedbed.rs, reading/worker.py, src/photos.rs, src/photo_cache.rs, src/photo_notices.rs, photo/render.mjs, photo/build.mjs -->
 # terrarium-server
 
 生态箱独立服务端，生产 HTTP/WS 与存储使用 Rust + SQLite。兼容现有 World 的 HTTP/WS 协议与 TS 存档，可通过 Native 原子发布控制器运行。公共接口仅监听回环地址，管理台使用独立私网端口。
 
+提交队列、合批落盘与性能指标见 [report-processing.md](docs/report-processing.md)。公开页面的赞赏弹窗及关闭规则见 [support-dialog.md](docs/support-dialog.md)。
+
 已实现：
 
 - 排行榜、摘要、分页观察页、单箱状态与按需回放读取。历史发布资源按 release ID 读取，打开的页面保留对应版本的渲染资源。
-- 自动分配 ID/token，兼容旧 ID 注册，Bearer 鉴权，HTTP 完整上报和 WS 完整/增量上报。提交上限 8 MiB，每连接最多 2 个待处理报告，全局原始报告缓冲 24 MiB、同时验证最多 4 个报告，WS 每 30 秒检查心跳。
+- 自动分配 ID/token，兼容旧 ID 注册，Bearer 鉴权，HTTP 完整上报和 WS 完整/增量上报。提交上限 8 MiB，每连接最多 2 个待处理报告，全局原始报告缓冲 24 MiB、同时处理最多 8 个报告、两个兼容验证进程，WS 每 30 秒检查心跳。
 - 与 TS 一致的规范 JSON SHA-256、基线 revision/hash 和目标 hash 校验。首次连接、重连及校验失败要求完整状态；成功确认在 SQLite 事务提交后发送。
 - 最低客户端版本、HTTP Push 开关及定时生效规则，忽略提交时返回 `accepted: false`。协议升级提醒使用独立记录，保留既有通知 ID，不进入管理员公告列表；支持公开公告及鉴权公告轮询。
 - 独立私网管理端口，包含管理页面、MiSans 和 Lucide 资源；校验实际来源 IP、CIDR、Host 与 Origin，管理员 Bearer token 与普通箱子凭据分离。公共端口不提供管理接口。
