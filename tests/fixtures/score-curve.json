@@ -1,0 +1,494 @@
+[
+  {
+    "state": {
+      "plants": [
+        {
+          "species": "fern",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "clover",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "moss",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "basil",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "bean",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "sunflower",
+          "stage": 3,
+          "health": 100
+        }
+      ],
+      "bugs": [
+        {
+          "species": "ant",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "bee",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "butterfly",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "spider",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "ant",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "bee",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        }
+      ]
+    },
+    "score": 358,
+    "parts": {
+      "plants": 195,
+      "bugs": 163,
+      "seeds": 0
+    }
+  },
+  {
+    "state": {
+      "plants": [
+        {
+          "species": "fern",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "clover",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "moss",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "basil",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "bean",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "sunflower",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "mint",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "daisy",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "lavender",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "tomato",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "strawberry",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "mushroom",
+          "stage": 3,
+          "health": 100
+        }
+      ],
+      "bugs": [
+        {
+          "species": "ant",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "bee",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "butterfly",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "spider",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "ant",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "bee",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "butterfly",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "spider",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "ant",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "bee",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "butterfly",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "spider",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        }
+      ]
+    },
+    "score": 467,
+    "parts": {
+      "plants": 295,
+      "bugs": 172,
+      "seeds": 0
+    }
+  },
+  {
+    "state": {
+      "plants": [
+        {
+          "species": "waterweed",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "waterlily",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "algae",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "hornwort",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "duckweed",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "vallisneria",
+          "stage": 3,
+          "health": 100
+        }
+      ],
+      "fish": [
+        {
+          "species": "guppy",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "goldfish",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "perch",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "guppy",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "goldfish",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "perch",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        }
+      ],
+      "oxygen": 100,
+      "cleanliness": 100
+    },
+    "score": 367,
+    "parts": {
+      "plants": 191,
+      "fish": 144,
+      "water": 32
+    }
+  },
+  {
+    "state": {
+      "plants": [
+        {
+          "species": "waterweed",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "waterlily",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "algae",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "hornwort",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "duckweed",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "vallisneria",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "java_moss",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "waterweed",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "waterlily",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "algae",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "hornwort",
+          "stage": 3,
+          "health": 100
+        },
+        {
+          "species": "duckweed",
+          "stage": 3,
+          "health": 100
+        }
+      ],
+      "fish": [
+        {
+          "species": "guppy",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "goldfish",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "perch",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "guppy",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "goldfish",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "perch",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "guppy",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "goldfish",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "perch",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "guppy",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "goldfish",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        },
+        {
+          "species": "perch",
+          "ageHours": 24,
+          "energy": 100,
+          "hunger": 0,
+          "health": 100
+        }
+      ],
+      "oxygen": 100,
+      "cleanliness": 100
+    },
+    "score": 429,
+    "parts": {
+      "plants": 259,
+      "fish": 143,
+      "water": 27
+    }
+  }
+]

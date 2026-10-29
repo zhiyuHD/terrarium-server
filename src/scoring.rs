@@ -2,6 +2,43 @@ use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
+pub const SCORE_VERSION: i64 = 3;
+
+pub fn curved_score(base: f64) -> f64 {
+    if base <= 200.0 {
+        base
+    } else {
+        200.0 + 200.0 * (base / 200.0).ln()
+    }
+    .round()
+}
+
+fn curve_parts(parts: Value, keys: &[&str]) -> Value {
+    let base: f64 = keys.iter().map(|key| parts[key].as_f64().unwrap()).sum();
+    if base <= 200.0 {
+        return parts;
+    }
+    let total = curved_score(base);
+    let mut shares: Vec<_> = keys
+        .iter()
+        .enumerate()
+        .map(|(index, key)| {
+            let exact = parts[key].as_f64().unwrap() * total / base;
+            (index, exact.fract(), exact.floor())
+        })
+        .collect();
+    let remainder = (total - shares.iter().map(|s| s.2).sum::<f64>()) as usize;
+    shares.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+    for share in shares.iter_mut().take(remainder) {
+        share.2 += 1.0;
+    }
+    let mut result = serde_json::Map::new();
+    for (index, _, points) in shares {
+        result.insert(keys[index].into(), json!(points));
+    }
+    Value::Object(result)
+}
+
 fn number(value: &Value, key: &str) -> Result<f64> {
     value[key]
         .as_f64()
@@ -50,9 +87,10 @@ pub fn score_parts(state: &Value) -> Result<Value> {
                     * 1.0_f64.min(oxygen / 50.0).min(cleanliness / 50.0),
             )
         })?;
-        Ok(
+        Ok(curve_parts(
             json!({"plants":plants,"fish":fish,"water":(40.0*oxygen.min(cleanliness)/100.0*1.0_f64.min(plants/40.0).min(fish/40.0)).round()}),
-        )
+            &["plants", "fish", "water"],
+        ))
     } else {
         let bugs = species_score(&state["bugs"], |b| {
             Ok(40.0 * number(b, "energy")? / 100.0
@@ -64,7 +102,10 @@ pub fn score_parts(state: &Value) -> Result<Value> {
                         / 100.0)
                 * maturity(b)?)
         })?;
-        Ok(json!({"plants":plants,"bugs":bugs,"seeds":0}))
+        Ok(curve_parts(
+            json!({"plants":plants,"bugs":bugs,"seeds":0}),
+            &["plants", "bugs", "seeds"],
+        ))
     }
 }
 pub fn score(state: &Value) -> Result<f64> {

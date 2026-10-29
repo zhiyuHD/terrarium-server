@@ -1,5 +1,5 @@
 //! Derived ranking rows exclude histories and are rebuilt after older binaries write snapshots.
-use crate::scoring::score_parts;
+use crate::scoring::{SCORE_VERSION, score_parts};
 use anyhow::Result;
 use rusqlite::{Connection, params};
 use serde_json::Value;
@@ -10,6 +10,13 @@ pub(crate) fn initialize(conn: &mut Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS box_wallets ON box_summaries(kind,(earned-spent) DESC,id_sort) WHERE earned>0;
         CREATE TRIGGER IF NOT EXISTS box_summary_update AFTER UPDATE ON boxes BEGIN DELETE FROM box_summaries WHERE id=old.id; END;
         CREATE TRIGGER IF NOT EXISTS box_summary_delete AFTER DELETE ON boxes BEGIN DELETE FROM box_summaries WHERE id=old.id; END;")?;
+    tx.execute_batch("CREATE TABLE IF NOT EXISTS box_score_rules(version INTEGER NOT NULL);")?;
+    let version = tx.query_row("SELECT MAX(version) FROM box_score_rules", [], |row| {
+        row.get::<_, Option<i64>>(0)
+    })?;
+    if version != Some(SCORE_VERSION) {
+        tx.execute("DELETE FROM box_summaries", [])?;
+    }
     {
         let mut query = tx.prepare("SELECT b.id,b.kind,b.revision,b.reported_at,b.id_sort,json_extract(b.entry,'$.state.name'),json_extract(b.entry,'$.state.economy.earned'),json_extract(b.entry,'$.state.economy.spent'),
             CASE WHEN b.kind='water' THEN json_object('plants',json_extract(b.entry,'$.state.plants'),'fish',json_extract(b.entry,'$.state.fish'),'oxygen',json_extract(b.entry,'$.state.oxygen'),'cleanliness',json_extract(b.entry,'$.state.cleanliness'))
@@ -18,6 +25,18 @@ pub(crate) fn initialize(conn: &mut Connection) -> Result<()> {
         let mut rows = query.query([])?;
         while let Some(row) = rows.next()? {
             let state: Value = serde_json::from_str(&row.get::<_, String>(8)?)?;
+            let parts = score_parts(&state)?;
+            let score = parts
+                .as_object()
+                .unwrap()
+                .values()
+                .map(|v| v.as_f64().unwrap())
+                .sum::<f64>() as i64;
+            let id: String = row.get(0)?;
+            tx.execute(
+                "UPDATE boxes SET score=?2,entry=json_set(entry,'$.score',?2) WHERE id=?1 AND (score!=?2 OR json_extract(entry,'$.score') IS NOT ?2)",
+                params![id, score],
+            )?;
             let earned = row.get::<_, Option<i64>>(6).ok().flatten();
             let spent = row.get::<_, Option<i64>>(7).ok().flatten();
             let (earned, spent) = wallet(earned, spent);
@@ -29,7 +48,7 @@ pub(crate) fn initialize(conn: &mut Connection) -> Result<()> {
                     row.get::<_, Option<String>>(2)?,
                     row.get::<_, String>(3)?,
                     row.get::<_, Option<String>>(5)?,
-                    score_parts(&state)?.to_string(),
+                    parts.to_string(),
                     earned,
                     spent,
                     row.get::<_, String>(4)?,
@@ -38,6 +57,11 @@ pub(crate) fn initialize(conn: &mut Connection) -> Result<()> {
             )?;
         }
     }
+    tx.execute("DELETE FROM box_score_rules", [])?;
+    tx.execute(
+        "INSERT INTO box_score_rules(version) VALUES(?1)",
+        [SCORE_VERSION],
+    )?;
     tx.commit()?;
     Ok(())
 }

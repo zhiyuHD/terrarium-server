@@ -5,6 +5,8 @@
 
 提交队列、合批落盘与性能指标见 [report-processing.md](docs/report-processing.md)。公开页面的赞赏弹窗及关闭规则见 [support-dialog.md](docs/support-dialog.md)。
 
+计分基础总分 B≤200 时不变，超过后使用 round(200+200×ln(B/200))，不设固定上限。分项按贡献比例分配整数余数，服务端重算旧客户端的提交。启动时按计分版本原子重建所有箱子的得分，包含离线箱子；生物状态、ID、token 与增量校验不变。
+
 已实现：
 
 - 论坛帖子和回复支持 Markdown 标题、列表、引用、代码、表格、链接及图片。原始 HTML 转义，链接限制安全协议。

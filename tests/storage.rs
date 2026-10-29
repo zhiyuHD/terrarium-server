@@ -157,3 +157,90 @@ fn refuses_invalid_snapshot_before_import_and_leaves_existing_rows_unchanged() {
     assert!(LegacySnapshot::read(&old).is_err());
     assert_eq!(store.ranked(None).unwrap().len(), 2);
 }
+
+#[test]
+fn opening_old_scores_rebuilds_all_ranks_without_changing_state_tokens_or_revisions() {
+    use rusqlite::{Connection, params};
+    let (dir, store) = fixture();
+    for index in 0..24 {
+        store
+            .commit_entry(&entry(&format!("box-extra-{index:02}")), None)
+            .unwrap();
+    }
+    let mut initial = entry("box-first");
+    initial["state"]["plants"] = json!(
+        (0..12)
+            .map(|i| json!({"species":format!("plant-{i}"),"stage":3,"health":100}))
+            .collect::<Vec<_>>()
+    );
+    initial["state"]["bugs"] = json!([]);
+    store
+        .replace_report("box-first", Some("initial"), &initial)
+        .unwrap();
+    let before = store.get("box-first").unwrap().unwrap();
+    let path = dir.path().join("data.sqlite");
+    drop(store);
+    let conn = Connection::open(&path).unwrap();
+    conn.execute(
+        "UPDATE boxes SET score=480,entry=json_set(entry,'$.score',480) WHERE id=?1",
+        ["box-first"],
+    )
+    .unwrap();
+    conn.execute("UPDATE box_score_rules SET version=?1", params![2])
+        .unwrap();
+    drop(conn);
+    let store = Store::open(&path).unwrap();
+    let after = store.get("box-first").unwrap().unwrap();
+    assert_eq!(after["state"], before["state"]);
+    assert_eq!(after["reportRevision"], before["reportRevision"]);
+    assert_eq!(after["reportedAt"], before["reportedAt"]);
+    assert_eq!(
+        after["score"].as_f64().unwrap(),
+        terrarium_server::scoring::curved_score(480.)
+    );
+    let summary = store.summary("land", 100, None).unwrap();
+    assert_eq!(summary["entries"].as_array().unwrap().len(), 26);
+    assert_eq!(summary["entries"][0]["id"], "box-first");
+    store.check().unwrap();
+    let export = dir.path().join("curve-export");
+    store.export(&export).unwrap();
+    assert_eq!(
+        fs::read(export.join("credentials.json")).unwrap(),
+        fs::read(dir.path().join("old/credentials.json")).unwrap()
+    );
+    assert_eq!(
+        fs::read(export.join("announcements.json")).unwrap(),
+        fs::read(dir.path().join("old/announcements.json")).unwrap()
+    );
+    drop(store);
+    let reopened = Store::open(&path).unwrap();
+    assert_eq!(reopened.get("box-first").unwrap().unwrap(), after);
+}
+
+#[test]
+fn failed_score_rebuild_rolls_back_formula_marker_and_every_score() {
+    use rusqlite::Connection;
+    let (dir, store) = fixture();
+    let path = dir.path().join("data.sqlite");
+    drop(store);
+    let conn = Connection::open(&path).unwrap();
+    conn.execute("UPDATE box_score_rules SET version=2", [])
+        .unwrap();
+    conn.execute("UPDATE boxes SET score=999", []).unwrap();
+    conn.execute("UPDATE boxes SET entry=json_set(entry,'$.state.plants',json('[{}]')) WHERE id='box-second'", []).unwrap();
+    drop(conn);
+    assert!(Store::open(&path).is_err());
+    let conn = Connection::open(&path).unwrap();
+    assert_eq!(
+        conn.query_row("SELECT version FROM box_score_rules", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM boxes WHERE score=999", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+}
