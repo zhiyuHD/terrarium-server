@@ -21,10 +21,46 @@ static SNAPSHOTS: LazyLock<Mutex<VecDeque<Snapshot>>> =
     LazyLock::new(|| Mutex::new(VecDeque::new()));
 fn score(created: i64, now: i64, likes: i64, replies: i64, views: i64) -> f64 {
     let age = now.saturating_sub(created).max(0) as f64 / 86_400_000.0;
+    let engagement = |count: i64, weight: f64| {
+        let count = count.max(0) as u64;
+        let baseline: f64 = (1..=20).map(action_multiplier).sum();
+        weight / baseline * action_total(count)
+    };
     100.0 * (1.0 - age)
-        + 8.0 * likes.clamp(0, 20) as f64 / 20.0
-        + 6.0 * replies.clamp(0, 20) as f64 / 20.0
+        + engagement(likes, 8.0)
+        + engagement(replies, 6.0)
         + 3.0 * views.clamp(0, 100) as f64 / 100.0
+}
+
+/// The marginal value peaks around the fiftieth interaction, then falls to 0.1x at 100.
+/// Interactions after 100 remain valuable at 0.1x, so their total contribution is unbounded.
+fn action_multiplier(index: u64) -> f64 {
+    match index {
+        1..=50 => 1.0 + 4.0 * (index - 1) as f64 / 49.0,
+        51..=100 => 5.0 - 4.9 * (index - 50) as f64 / 50.0,
+        _ => 0.1,
+    }
+}
+fn action_total(count: u64) -> f64 {
+    let first = count.min(50) as f64;
+    let first_sum = first
+        * (1.0
+            + if first > 0.0 {
+                1.0 + 4.0 * (first - 1.0) / 49.0
+            } else {
+                0.0
+            })
+        / 2.0;
+    let middle_count = count.saturating_sub(50).min(50) as f64;
+    let middle_sum = middle_count
+        * (4.9
+            + if middle_count > 0.0 {
+                5.0 - 4.9 * middle_count / 50.0
+            } else {
+                0.0
+            })
+        / 2.0;
+    first_sum + middle_sum + count.saturating_sub(100) as f64 * 0.1
 }
 pub(crate) fn ranked_threads(
     conn: &Connection,
@@ -138,16 +174,28 @@ pub(crate) fn page(
 mod tests {
     use super::score;
     #[test]
-    fn time_declines_continuously_crosses_zero_and_dominates_capped_engagement() {
+    fn time_declines_without_floor_and_each_engagement_has_a_midrange_peak() {
         let day = 86_400_000;
         assert_eq!(score(0, 0, 0, 0, 0), 100.0);
         assert_eq!(score(0, day / 2, 0, 0, 0), 50.0);
         assert_eq!(score(0, day, 0, 0, 0), 0.0);
         assert!(score(0, day - 1, 0, 0, 0) > 0.0);
         assert!(score(0, day + 1, 0, 0, 0) < 0.0);
-        assert_eq!(score(0, 0, 20, 20, 100), 117.0);
-        assert_eq!(score(0, 0, i64::MAX, i64::MAX, i64::MAX), 117.0);
-        assert!(score(0, day / 4, 1000, 1000, 1000) < score(day / 4, day / 4, 0, 0, 0));
+        assert!((score(0, 0, 20, 20, 100) - 117.0).abs() < 1e-9);
+        assert!(score(0, 0, 50, 0, 0) > score(0, 0, 49, 0, 0));
+        assert!(
+            score(0, 0, 51, 0, 0) - score(0, 0, 50, 0, 0)
+                > score(0, 0, 100, 0, 0) - score(0, 0, 99, 0, 0)
+        );
+        assert!(
+            (score(0, 0, 100, 0, 0) - score(0, 0, 99, 0, 0))
+                / (score(0, 0, 1, 0, 0) - score(0, 0, 0, 0, 0))
+                - 0.1
+                < 1e-9
+        );
+        assert!(score(0, 0, i64::MAX, 0, 0) > score(0, 0, 100, 0, 0));
+        assert!(score(0, day + 1, 0, 0, 0) < 0.0);
+        assert!(score(0, day / 4, 1000, 1000, 1000) > score(0, day + 1, 1000, 1000, 1000));
         for (l, r, v) in [(1, 0, 0), (0, 1, 0), (0, 0, 1)] {
             assert!(score(0, 0, l, r, v) > 100.0);
         }
