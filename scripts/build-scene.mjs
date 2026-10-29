@@ -9,4 +9,4 @@ const root=fileURLToPath(new URL('..',import.meta.url));
 const require=createRequire(new URL('../photo/package.json',import.meta.url));
 const {build}=require('esbuild');
 const renderer=join(resolve(values.renderer),'src/index.ts');
-await build({stdin:{contents:`export * from ${JSON.stringify(join(resolve(values.world),'webui/scene.ts'))};\nexport {setSceneActive,setSceneFrameRate} from ${JSON.stringify(renderer)};`,resolveDir:root,sourcefile:'observation-scene.ts'},alias:{'terrarium-renderer':renderer},bundle:true,format:'esm',platform:'browser',target:'es2022',outfile:join(root,'web/scene.js')});
+await build({stdin:{contents:`export * from ${JSON.stringify(join(resolve(values.world),'webui/scene.ts'))};\nexport {setSceneActive,setSceneFrameRate,renderSceneFrame} from ${JSON.stringify(renderer)};`,resolveDir:root,sourcefile:'observation-scene.ts'},alias:{'terrarium-renderer':renderer},bundle:true,format:'esm',platform:'browser',target:'es2022',outfile:join(root,'web/scene.js')});

@@ -157,6 +157,11 @@ function createSceneAnimation(canvas, draw) {
         schedule();
       } else remove(animation);
     },
+    drawOnce() {
+      if (disposed || !ready) return;
+      animation.last = performance.now();
+      animation.draw(animation.last);
+    },
     setFrameRate(fps) {
       if (!Number.isFinite(fps) || fps < 1 || fps > 60) throw new RangeError("Frame rate must be between 1 and 60");
       animation.interval = 1e3 / fps;
@@ -175,6 +180,9 @@ function setSceneActive(canvas, active) {
 }
 function setSceneFrameRate(canvas, fps) {
   controls.get(canvas)?.setFrameRate(fps);
+}
+function renderSceneFrame(canvas) {
+  controls.get(canvas)?.drawOnce();
 }
 
 // packages/terrarium-renderer/src/geometry.ts
@@ -2597,6 +2605,7 @@ export {
   drawScene2 as drawScene,
   landScene,
   plotPosition,
+  renderSceneFrame,
   setSceneActive,
   setSceneFrameRate
 };
