@@ -2,7 +2,24 @@
 import { createInterface } from "node:readline";
 
 // ../terrarium-server/bridge/legacy-src/scoring.ts
-var TERRARIUM_SCORE_VERSION = 2;
+var TERRARIUM_SCORE_VERSION = 3;
+function curvedScore(base) {
+  return Math.round(base <= 200 ? base : 200 + 200 * Math.log(base / 200));
+}
+function recordedScore(version, value = 0) {
+  return version === 2 ? curvedScore(value) : version === TERRARIUM_SCORE_VERSION ? value : 0;
+}
+function curveParts(parts) {
+  const entries = Object.entries(parts), base = entries.reduce((sum, [, value]) => sum + value, 0);
+  if (base <= 200) return parts;
+  const total = curvedScore(base);
+  const shares = entries.map(([key, value], index) => ({ key, index, exact: value * total / base, points: Math.floor(value * total / base) }));
+  const remainder = total - shares.reduce((sum, share) => sum + share.points, 0);
+  shares.sort((a, b) => b.exact - b.points - (a.exact - a.points) || a.index - b.index);
+  for (const share of shares.slice(0, remainder)) share.points++;
+  shares.sort((a, b) => a.index - b.index);
+  return Object.fromEntries(shares.map((share) => [share.key, share.points]));
+}
 function speciesScore(organisms, value) {
   const groups = /* @__PURE__ */ new Map();
   for (const organism of organisms) {
@@ -17,13 +34,13 @@ function scoreParts(state) {
   const plants = speciesScore(state.plants, (plant) => (plant.stage + 1) * plant.health / 10);
   if ("fish" in state) {
     const fish = speciesScore(state.fish, (fish2) => 40 * fish2.health / 100 * fish2.energy / 100 * maturity(fish2.ageHours) * Math.min(1, state.oxygen / 50, state.cleanliness / 50));
-    return { plants, fish, water: Math.round(40 * Math.min(state.oxygen, state.cleanliness) / 100 * Math.min(1, plants / 40, fish / 40)) };
+    return curveParts({ plants, fish, water: Math.round(40 * Math.min(state.oxygen, state.cleanliness) / 100 * Math.min(1, plants / 40, fish / 40)) });
   }
-  return {
+  return curveParts({
     plants,
     bugs: speciesScore(state.bugs, (bug) => 40 * bug.energy / 100 * (1 - (bug.hunger ?? 0) / 100) * maturity(bug.ageHours)),
     seeds: 0
-  };
+  });
 }
 function score(state) {
   return Object.values(scoreParts(state)).reduce((sum, part) => sum + part, 0);
@@ -33,10 +50,10 @@ function score(state) {
 var TERRARIUM_LEVELS = [
   { level: 1, requiredScore: 0, size: 5, organisms: 12, collection: 48 },
   { level: 2, requiredScore: 120, size: 6, organisms: 18, collection: 64 },
-  { level: 3, requiredScore: 260, size: 7, organisms: 24, collection: 96 },
-  { level: 4, requiredScore: 420, size: 8, organisms: 32, collection: 128 }
+  { level: 3, requiredScore: curvedScore(260), size: 7, organisms: 24, collection: 96 },
+  { level: 4, requiredScore: curvedScore(420), size: 8, organisms: 32, collection: 128 }
 ];
-var TERRARIUM_WATER_LEVELS = TERRARIUM_LEVELS.map((level, index) => ({ ...level, requiredScore: [0, 120, 240, 360][index] }));
+var TERRARIUM_WATER_LEVELS = TERRARIUM_LEVELS.map((level, index) => ({ ...level, requiredScore: [0, 120, 240, 360].map(curvedScore)[index] }));
 function expansionLevels(state) {
   return "kind" in state && state.kind === "water" ? TERRARIUM_WATER_LEVELS : TERRARIUM_LEVELS;
 }
@@ -59,10 +76,10 @@ function inHabitat(state, x, y) {
 function observeProgress(state) {
   const p = state.progression ??= { level: 1, peakScore: 0, guideStep: 0, guideSkipped: false, actions: [] };
   if (p.scoreVersion !== TERRARIUM_SCORE_VERSION) {
-    p.peakScore = 0;
+    p.peakScore = recordedScore(p.scoreVersion, p.peakScore);
     p.scoreVersion = TERRARIUM_SCORE_VERSION;
   }
-  p.peakScore = Math.max(p.peakScore, score(state), ...state.history.filter((h) => h.scoreVersion === TERRARIUM_SCORE_VERSION).map((h) => h.score ?? 0));
+  p.peakScore = Math.max(p.peakScore, score(state), ...state.history.map((h) => recordedScore(h.scoreVersion, h.score)));
   return p;
 }
 var ACTIONS = ["observe", "care", "plant", "inhabit", "collect", "upgrade", "build"];
@@ -76,11 +93,11 @@ var LAND_LETTERS = [
   { title: "\u7A7A\u767D\u7684\u690D\u7269\u6807\u7B7E", text: "\u62BD\u5C49\u91CC\u6709\u51E0\u5F20\u7A7A\u767D\u6807\u7B7E\u3002\u6311\u4E00\u683C\u6C34\u5206\u548C\u5149\u7167\u5408\u9002\u7684\u7A7A\u5730\u79CD\u4E0B\u690D\u7269\u3002\u79CD\u5B50\u9700\u8981\u7D2F\u8BA1 2 \u4E2A\u9002\u5B9C\u767D\u5929\u6A21\u62DF\u5C0F\u65F6\u624D\u53D1\u82BD\uFF0C\u591C\u91CC\u4E0D\u7D2F\u8BA1\uFF1B\u540C\u79CD\u53EA\u53D6\u8D21\u732E\u6700\u9AD8\u7684\u524D\u4E09\u682A\uFF0C\u6309 100%\u300150%\u300125% \u8BA1\u5206\uFF0C\u79CD\u5B50\u672C\u8EAB\u4E0D\u8BA1\u5206\u3002\u591A\u6837\u5316\u79CD\u690D\u6BD4\u6324\u6EE1\u540C\u4E00\u79CD\u66F4\u6709\u7528\u3002\u64AD\u79CD\u540E\u770B\u56DE\u6267 seed \u6216 seeds \u7684 ID \u548C\u5750\u6807\u786E\u8BA4\u5165\u571F\uFF1B\u4E4B\u540E\u7528 care \u770B\u53D1\u82BD\u5269\u4F59\u9002\u5B9C\u767D\u5929\u6A21\u62DF\u5C0F\u65F6\uFF0C\u591C\u95F4\u4FDD\u6301\u4E0D\u53D8\u662F\u6B63\u5E38\u7684\u3002", task: "\u5728\u7A7A\u683C\u64AD\u79CD\u4E00\u6B21\uFF1B\u53EF\u7528 terrarium_sow_area \u6279\u91CF\u64AD\u79CD\u3002", action: "plant" },
   { title: "\u4F1A\u52A8\u7684\u90BB\u5C45", text: "\u89C2\u5BDF\u7B14\u8BB0\u8FD8\u7F3A\u51E0\u9875\uFF1A\u8C01\u5403\u4EC0\u4E48\uFF0C\u8C01\u53C8\u9700\u8981\u5E87\u62A4\uFF1F\u5148\u786E\u8BA4\u98DF\u7269\u6765\u6E90\u518D\u653E\u866B\u3002\u869C\u866B\u4F1A\u5543\u690D\u7269\uFF0C\u7532\u866B\u9700\u8981\u869C\u866B\uFF0C\u8718\u86DB\u4F1A\u6355\u98DF\u5176\u4ED6\u866B\uFF1B\u8682\u8681\u7F3A\u7CAE\u4E5F\u53EF\u80FD\u91C7\u96C6\u690D\u7269\u3002\u80FD\u91CF\u4E0E\u9965\u997F\u5206\u5F00\uFF0Cfeed_bug \u53EA\u8865\u80FD\u91CF\uFF0C\u5B9E\u9645\u53D6\u98DF\u624D\u80FD\u964D\u4F4E\u9965\u997F\u3002\u653E\u5165\u8682\u8681\u5E76\u51FA\u73B0\u8681\u5DE2\u540E\uFF0C\u7528 inspect \u7684 colonies \u627E\u5DE2 ID\uFF0C\u518D\u7528 terrarium_feed_nest \u7ED9\u5DE2\u6DFB 5 \u4EFD\u7CAE\u3002\u653E\u866B\u540E\u7528 inspect \u7684 residents \u786E\u8BA4 ID\uFF0C\u518D\u7528 care \u7684 feeding \u770B lastMeal\uFF1B\u9965\u997F\u4E0B\u964D\u624D\u8868\u793A\u5B9E\u9645\u5403\u5230\u4E86\uFF0C\u5355\u8865\u80FD\u91CF\u4E0D\u7B97\u3002", task: "\u786E\u8BA4\u98DF\u7269\u6765\u6E90\u540E\u653E\u5165\u4E00\u53EA\u866B\u5B50\uFF0C\u89C2\u5BDF\u5176\u53D6\u98DF\u4E0E\u9965\u997F\u3002", action: "inhabit" },
   { title: "\u65E7\u4ED3\u5E93\u7684\u94A5\u5319", text: "\u67DC\u5E95\u7684\u94A5\u5319\u7EC8\u4E8E\u627E\u5230\u4E86\u3002\u6536\u85CF\u4F1A\u6682\u505C\u8FD9\u4F4D\u4F4F\u5BA2\u7684\u6A21\u62DF\uFF0C\u4E5F\u4E0D\u518D\u8BA1\u5206\uFF1B\u5176\u4ED6\u751F\u547D\u4ECD\u9700\u7167\u987E\u3002\u653E\u56DE\u690D\u7269\u6216\u79CD\u5B50\u9700\u8981\u4E00\u4E2A\u6CA1\u6709\u690D\u7269\u548C\u79CD\u5B50\u7684\u683C\u5B50\u3002\u9762\u677F\u53EF\u5148\u70B9\u9009\u7A7A\u683C\u518D\u70B9\u201C\u653E\u56DE\u9009\u4E2D\u683C\u201D\uFF0C\u5DE5\u5177\u9700\u8981\u6307\u5B9A x/y\u3002\u6536\u85CF\u540E\u770B\u56DE\u6267 collectionCount \u548C\u6536\u85CF\u5217\u8868\u786E\u8BA4\u6807\u672C\uFF1B\u653E\u56DE\u540E\u67E5\u770B\u56DE\u6267\u5750\u6807\u548C residents\uFF0C\u786E\u8BA4\u5B83\u5DF2\u56DE\u5230\u7BB1\u5185\u3002", task: "\u6536\u85CF\u4E00\u4F4D\u4F4F\u5BA2\uFF1B\u653E\u56DE\u65F6\u5148\u9009\u5408\u6CD5\u4F4D\u7F6E\uFF0C\u4F4D\u7F6E\u4E0D\u5408\u9002\u4E0D\u4F1A\u4E22\u5931\u6536\u85CF\u3002", action: "collect" },
-  { title: "\u56F4\u680F\u5916\u7684\u65B0\u5730\u65B9", text: "\u6700\u540E\u4E00\u5C01\u4FE1\u5199\u7740\uFF1A\u201C\u5F53\u8FD9\u91CC\u8DB3\u591F\u7E41\u76DB\uFF0C\u56F4\u680F\u5916\u8FD8\u6709\u5730\u65B9\u3002\u201D\u6269\u5EFA\u6309\u65B0\u516C\u5F0F\u5DF2\u8BB0\u5F55\u7684\u6700\u9AD8\u5206\u5224\u5B9A\uFF0C\u4E0D\u82B1\u5206\uFF0C\u4E5F\u4E0D\u4F1A\u56E0\u5F53\u524D\u5206\u4E0B\u964D\u7F29\u5C0F\u3002\u5730\u7BB1\u95E8\u69DB\u4E3A 120\u3001260\u3001420\uFF1B\u65E7\u516C\u5F0F\u9AD8\u5206\u4E0D\u7528\u4E8E\u89E3\u9501\u3002\u540C\u79CD\u53EA\u8BA1\u524D\u4E09\uFF0C\u52A8\u7269\u517B\u6EE1 24 \u4E2A\u6A21\u62DF\u5C0F\u65F6\u624D\u6709\u5B8C\u6574\u6210\u719F\u5EA6\u8D21\u732E\uFF0C\u8FC7\u997F\u4F1A\u964D\u5206\u3002\u6269\u5EFA\u540E\u7528 terrarium_progress \u786E\u8BA4 level\u3001size \u548C collection \u5BB9\u91CF\u5DF2\u589E\u52A0\uFF1B\u6700\u9AD8\u5206\u4FDD\u7559\uFF0C\u4E0D\u6263\u5206\u3002", task: "\u65B0\u516C\u5F0F\u6700\u9AD8\u5206\u8FBE\u5230 120 \u540E\u6269\u5EFA\u5230\u4E8C\u7EA7\uFF1B\u5267\u60C5\u6CA1\u6709\u989D\u5916\u79EF\u5206\u5956\u52B1\u3002", action: "upgrade" }
+  { title: "\u56F4\u680F\u5916\u7684\u65B0\u5730\u65B9", text: "\u6700\u540E\u4E00\u5C01\u4FE1\u5199\u7740\uFF1A\u201C\u5F53\u8FD9\u91CC\u8DB3\u591F\u7E41\u76DB\uFF0C\u56F4\u680F\u5916\u8FD8\u6709\u5730\u65B9\u3002\u201D\u6269\u5EFA\u6309\u65B0\u516C\u5F0F\u5DF2\u8BB0\u5F55\u7684\u6700\u9AD8\u5206\u5224\u5B9A\uFF0C\u4E0D\u82B1\u5206\uFF0C\u4E5F\u4E0D\u4F1A\u56E0\u5F53\u524D\u5206\u4E0B\u964D\u7F29\u5C0F\u3002\u5730\u7BB1\u95E8\u69DB\u4E3A 120\u3001252\u3001348\uFF1B\u7B2C\u4E8C\u7248\u516C\u5F0F\u7684\u6700\u9AD8\u5206\u4F1A\u6309\u66F2\u7EBF\u6362\u7B97\u3002\u540C\u79CD\u53EA\u8BA1\u524D\u4E09\uFF0C\u52A8\u7269\u517B\u6EE1 24 \u4E2A\u6A21\u62DF\u5C0F\u65F6\u624D\u6709\u5B8C\u6574\u6210\u719F\u5EA6\u8D21\u732E\uFF0C\u8FC7\u997F\u4F1A\u964D\u5206\u3002\u6269\u5EFA\u540E\u7528 terrarium_progress \u786E\u8BA4 level\u3001size \u548C collection \u5BB9\u91CF\u5DF2\u589E\u52A0\uFF1B\u6700\u9AD8\u5206\u4FDD\u7559\uFF0C\u4E0D\u6263\u5206\u3002", task: "\u65B0\u516C\u5F0F\u6700\u9AD8\u5206\u8FBE\u5230 120 \u540E\u6269\u5EFA\u5230\u4E8C\u7EA7\uFF1B\u5267\u60C5\u6CA1\u6709\u989D\u5916\u79EF\u5206\u5956\u52B1\u3002", action: "upgrade" }
 ];
 function validDevelopment(value, habitat) {
   const p = value.progression;
-  if (p !== void 0 && (!p || p.scoreVersion !== void 0 && p.scoreVersion !== 1 && p.scoreVersion !== TERRARIUM_SCORE_VERSION || !TERRARIUM_LEVELS.some((l) => l.level === p.level && Number.isSafeInteger(p.peakScore) && p.peakScore >= 0) || !Number.isInteger(p.guideStep) || p.guideStep < 0 || p.guideStep > LAND_LETTERS.length || typeof p.guideSkipped !== "boolean" || !Array.isArray(p.actions) || p.actions.length > ACTIONS.length || new Set(p.actions).size !== p.actions.length || !p.actions.every((a) => ACTIONS.includes(a)))) return false;
+  if (p !== void 0 && (!p || p.scoreVersion !== void 0 && p.scoreVersion !== 1 && p.scoreVersion !== 2 && p.scoreVersion !== TERRARIUM_SCORE_VERSION || !TERRARIUM_LEVELS.some((l) => l.level === p.level && Number.isSafeInteger(p.peakScore) && p.peakScore >= 0) || !Number.isInteger(p.guideStep) || p.guideStep < 0 || p.guideStep > LAND_LETTERS.length || typeof p.guideSkipped !== "boolean" || !Array.isArray(p.actions) || p.actions.length > ACTIONS.length || new Set(p.actions).size !== p.actions.length || !p.actions.every((a) => ACTIONS.includes(a)))) return false;
   return value.facilities === void 0 || Array.isArray(value.facilities) && value.facilities.length <= Object.values(TERRARIUM_FACILITIES).filter((f) => f.habitat === habitat).length && new Set(value.facilities.map((f) => f?.kind)).size === value.facilities.length && value.facilities.every((f) => f && Object.hasOwn(TERRARIUM_FACILITIES, f.kind) && TERRARIUM_FACILITIES[f.kind].habitat === habitat && capacity(value).level >= TERRARIUM_FACILITIES[f.kind].level && inHabitat(value, f.x, f.y) && typeof f.enabled === "boolean");
 }
 
@@ -264,7 +281,7 @@ function validFrame(value, atMs) {
 function validAquarium(value) {
   if (!value || typeof value !== "object") return false;
   const s = value;
-  return validCareAlerts(s.careAlerts) && validDeaths(s.deaths, s.updatedAtMs, capacity(s).size) && validCollection(s.collection, "water", capacity(s).collection) && (s.oxygenWarning === void 0 || typeof s.oxygenWarning === "boolean") && s.version === 1 && Number.isFinite(s.updatedAtMs) && Number.isSafeInteger(s.nextId) && s.nextId >= 1 && (s.name === void 0 || typeof s.name === "string" && s.name === s.name.trim() && Array.from(s.name).length >= 1 && Array.from(s.name).length <= TERRARIUM_MAX_NAME_LENGTH && !/[\u0000-\u001f\u007f-\u009f]/.test(s.name)) && validFrame({ ...s, phase: "day" }, s.updatedAtMs) && new Set([...s.fish, ...s.plants, ...s.food, ...s.eggs ?? [], ...(s.collection ?? []).map((e) => e.specimen)].map((e) => e.id)).size === s.fish.length + s.plants.length + s.food.length + (s.eggs?.length ?? 0) + (s.collection?.length ?? 0) && Array.isArray(s.history) && s.history.length <= 168 && s.history.every((h, i) => h && Number.isFinite(h.recordedAtMs) && (h.scoreVersion === void 0 || h.scoreVersion === 1 || h.scoreVersion === TERRARIUM_SCORE_VERSION) && (h.score === void 0 || Number.isSafeInteger(h.score) && h.score >= 0) && h.recordedAtMs <= s.updatedAtMs && (i === 0 || h.recordedAtMs > s.history[i - 1].recordedAtMs) && percent(h.oxygen) && percent(h.cleanliness) && validFrame({ progression: h.progression, kind: "water", phase: "day", oxygen: h.oxygen, cleanliness: h.cleanliness, fish: h.fish, plants: [], food: [] }, h.recordedAtMs)) && Array.isArray(s.replays) && s.replays.length <= TERRARIUM_MAX_REPLAYS && new Set(s.replays.map((r) => r?.id)).size === s.replays.length && s.replays.every((r, i) => {
+  return validCareAlerts(s.careAlerts) && validDeaths(s.deaths, s.updatedAtMs, capacity(s).size) && validCollection(s.collection, "water", capacity(s).collection) && (s.oxygenWarning === void 0 || typeof s.oxygenWarning === "boolean") && s.version === 1 && Number.isFinite(s.updatedAtMs) && Number.isSafeInteger(s.nextId) && s.nextId >= 1 && (s.name === void 0 || typeof s.name === "string" && s.name === s.name.trim() && Array.from(s.name).length >= 1 && Array.from(s.name).length <= TERRARIUM_MAX_NAME_LENGTH && !/[\u0000-\u001f\u007f-\u009f]/.test(s.name)) && validFrame({ ...s, phase: "day" }, s.updatedAtMs) && new Set([...s.fish, ...s.plants, ...s.food, ...s.eggs ?? [], ...(s.collection ?? []).map((e) => e.specimen)].map((e) => e.id)).size === s.fish.length + s.plants.length + s.food.length + (s.eggs?.length ?? 0) + (s.collection?.length ?? 0) && Array.isArray(s.history) && s.history.length <= 168 && s.history.every((h, i) => h && Number.isFinite(h.recordedAtMs) && (h.scoreVersion === void 0 || h.scoreVersion === 1 || h.scoreVersion === 2 || h.scoreVersion === TERRARIUM_SCORE_VERSION) && (h.score === void 0 || Number.isSafeInteger(h.score) && h.score >= 0) && h.recordedAtMs <= s.updatedAtMs && (i === 0 || h.recordedAtMs > s.history[i - 1].recordedAtMs) && percent(h.oxygen) && percent(h.cleanliness) && validFrame({ progression: h.progression, kind: "water", phase: "day", oxygen: h.oxygen, cleanliness: h.cleanliness, fish: h.fish, plants: [], food: [] }, h.recordedAtMs)) && Array.isArray(s.replays) && s.replays.length <= TERRARIUM_MAX_REPLAYS && new Set(s.replays.map((r) => r?.id)).size === s.replays.length && s.replays.every((r, i) => {
     if (!r || typeof r.id !== "string" || r.id.length > 160 || !Number.isFinite(r.recordedAtMs) || r.recordedAtMs > s.updatedAtMs || i > 0 && r.recordedAtMs < s.replays[i - 1].recordedAtMs || !Array.isArray(r.frames) || r.frames.length !== 3 || !r.frames.every((f) => validFrame(f, r.recordedAtMs))) return false;
     const [before, contact, after] = r.frames;
     const hunter = contact.fish.find((f) => f.id === r.hunterId), prey = contact.fish.find((f) => f.id === r.preyId);
@@ -376,7 +393,7 @@ function initializeHabitat(state) {
 }
 function validHabitat(state) {
   const percent2 = (value) => Number.isFinite(value) && value >= 0 && value <= 100;
-  return Array.isArray(state.soil) && state.soil.length === capacity(state).size ** 2 && state.soil.every((cell, i) => cell && cell.x === i % capacity(state).size && cell.y === Math.floor(i / capacity(state).size) && percent2(cell.moisture) && (cell.allowAntForaging === void 0 || typeof cell.allowAntForaging === "boolean") && (cell.antBackfilled === void 0 || typeof cell.antBackfilled === "boolean")) && Array.isArray(state.history) && state.history.length <= TERRARIUM_MAX_HISTORY && state.history.every((sample, i) => sample && Number.isFinite(sample.recordedAtMs) && (sample.scoreVersion === void 0 || sample.scoreVersion === 1 || sample.scoreVersion === TERRARIUM_SCORE_VERSION) && (sample.score === void 0 || Number.isSafeInteger(sample.score) && sample.score >= 0) && sample.recordedAtMs <= state.updatedAtMs && (i === 0 || sample.recordedAtMs > state.history[i - 1].recordedAtMs) && Array.isArray(sample.soilMoisture) && [5, 6, 7, 8].includes(sample.gridSize ?? 5) && (sample.gridSize ?? 5) <= capacity(state).size && sample.soilMoisture.length === (sample.gridSize ?? 5) ** 2 && sample.soilMoisture.every(percent2) && Array.isArray(sample.plants) && sample.plants.length <= (TERRARIUM_LEVELS.find((l) => l.size === (sample.gridSize ?? 5))?.organisms ?? 12) && sample.plants.every((p) => p && typeof p.id === "string" && p.id.length <= 32 && Object.hasOwn(TERRARIUM_PLANT_REQUIREMENTS, p.species) && percent2(p.moisture) && percent2(p.health) && Number.isInteger(p.stage) && p.stage >= 0 && p.stage <= 3 && Number.isFinite(p.growthHours) && p.growthHours >= 0));
+  return Array.isArray(state.soil) && state.soil.length === capacity(state).size ** 2 && state.soil.every((cell, i) => cell && cell.x === i % capacity(state).size && cell.y === Math.floor(i / capacity(state).size) && percent2(cell.moisture) && (cell.allowAntForaging === void 0 || typeof cell.allowAntForaging === "boolean") && (cell.antBackfilled === void 0 || typeof cell.antBackfilled === "boolean")) && Array.isArray(state.history) && state.history.length <= TERRARIUM_MAX_HISTORY && state.history.every((sample, i) => sample && Number.isFinite(sample.recordedAtMs) && (sample.scoreVersion === void 0 || sample.scoreVersion === 1 || sample.scoreVersion === 2 || sample.scoreVersion === TERRARIUM_SCORE_VERSION) && (sample.score === void 0 || Number.isSafeInteger(sample.score) && sample.score >= 0) && sample.recordedAtMs <= state.updatedAtMs && (i === 0 || sample.recordedAtMs > state.history[i - 1].recordedAtMs) && Array.isArray(sample.soilMoisture) && [5, 6, 7, 8].includes(sample.gridSize ?? 5) && (sample.gridSize ?? 5) <= capacity(state).size && sample.soilMoisture.length === (sample.gridSize ?? 5) ** 2 && sample.soilMoisture.every(percent2) && Array.isArray(sample.plants) && sample.plants.length <= (TERRARIUM_LEVELS.find((l) => l.size === (sample.gridSize ?? 5))?.organisms ?? 12) && sample.plants.every((p) => p && typeof p.id === "string" && p.id.length <= 32 && Object.hasOwn(TERRARIUM_PLANT_REQUIREMENTS, p.species) && percent2(p.moisture) && percent2(p.health) && Number.isInteger(p.stage) && p.stage >= 0 && p.stage <= 3 && Number.isFinite(p.growthHours) && p.growthHours >= 0));
 }
 function validReplays(state) {
   return state.replays === void 0 || Array.isArray(state.replays) && state.replays.length <= TERRARIUM_MAX_REPLAYS && state.replays.every((replay, i) => {

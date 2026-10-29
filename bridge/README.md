@@ -18,3 +18,5 @@ This fallback must remain until Rust validation covers all optional fields, coll
 地箱可选 `economy` 保存累计收入、支出、花盆库存及格子摆放。校验整数余额、库存成本与支出一致、型号、格子唯一性及总数 64 上限；`naturalGrowthHours` 校验 0–48 且不超过生长小时。旧状态缺失这些字段仍有效；校验不替客户端模拟交易，不注入字段，保留原校验和。
 
 The bundled validation snapshot includes the 0.9.0 optional crop, litter, ant-policy and neighbor-receipt fields and new land/water species. Older state versions still use the same migration path.
+
+Score version 3 is accepted in progression and history alongside versions 1 and 2. Validation preserves submitted state without converting historical scores or changing checksums.
