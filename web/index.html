@@ -117,11 +117,13 @@ async function fetchJson(url,signal,options={}){
 <section class="feedback" aria-label="意见反馈"><button type="button" id="feedback-toggle" class="feedback-toggle" aria-expanded="false" aria-controls="feedback-panel">意见反馈</button><div id="feedback-panel" class="feedback-panel" hidden><form id="feedback-form"><label>反馈内容（最多 2000 字）<textarea id="feedback-text" name="text" maxlength="2000" rows="4"></textarea></label><label>联系方式（选填）<input id="feedback-contact" name="contact" maxlength="200" autocomplete="off"></label><p>仅服务端管理员可见。</p><button class="feedback-submit" id="feedback-submit" type="submit">提交反馈</button><p id="feedback-status" role="status"></p></form></div></section>
 </main>
 <script type="module">
-import { createScene, createWaterScene, createPublicSelect, createPublicReplayControls } from './scene.js?v=dark-mode';
+import { createScene, createWaterScene, createPublicSelect, createPublicReplayControls, setSceneActive, setSceneFrameRate } from './scene.js?v=dark-mode';
 const $=id=>document.getElementById(id);
 const sort=createPublicSelect($('sort'),'排列方式',()=>goPage(1));sort.setOptions([{value:'score',label:'按积分排序'},{value:'recent',label:'按上报时间排序'}]);
 const scenes=new Map(),elementViews=new WeakMap();let kind='land',entries=[],loaded=false,requestVersion=0,loading=false,page=1,pages=1,total=0,counts={boxes:0,plants:0,animals:0},requestAbort,searchTimer;
-const observer=typeof IntersectionObserver==='function'?new IntersectionObserver(changes=>{for(const change of changes){const view=elementViews.get(change.target);if(view){view.visible=change.isIntersecting;updateActivity(view)}}},{rootMargin:'100px'}):null;
+let scrolling=false,scrollTimer;
+const mobile=matchMedia('(pointer: coarse)').matches||matchMedia('(max-width: 720px)').matches;
+const observer=typeof IntersectionObserver==='function'?new IntersectionObserver(changes=>{for(const change of changes){const view=elementViews.get(change.target);if(view){view.visible=change.isIntersecting;updateActivity(view)}}},{rootMargin:'0px'}):null;
 const pagers=['pagination-top','pagination-bottom'].map(id=>{const nav=el('nav','pager'),previous=el('button','pager-button','上一页'),label=el('span','pager-label'),next=el('button','pager-button','下一页');nav.setAttribute('aria-label','生态箱分页');previous.type=next.type='button';previous.onclick=()=>goPage(page-1,true);next.onclick=()=>goPage(page+1,true);nav.append(previous,label,next);$(id).append(nav);return{nav,previous,label,next}});
 const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)'),animations=new Set();
 function animate(node,frames,options){
@@ -137,12 +139,21 @@ function setCount(id,value){
 const dateFormat=new Intl.DateTimeFormat('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
 function el(tag,className,text){const node=document.createElement(tag);node.className=className;if(text!==undefined)node.textContent=text;return node}
 function updateActivity(view){
- const active=view.visible&&!document.hidden;
- if(active&&view.entry){view.scene??=view.createScene(view.canvas);view.scene.setState({...view.entry.state,phase:view.entry.phase??'day'})}
- else{view.scene?.dispose();view.scene=null}
+ const active=view.visible&&!document.hidden&&!scrolling;
+ if(active&&view.entry){
+  if(!view.scene){view.scene=view.createScene(view.canvas);setSceneFrameRate(view.canvas,mobile?12:24);view.dirty=true}
+  if(view.dirty){view.scene.setState({...view.entry.state,phase:view.entry.phase??'day'});view.dirty=false}
+ }
+ if(view.scene)setSceneActive(view.canvas,active);
  view.replay?.setActive(active);
 }
-function removeView(view){observer?.unobserve(view.article);view.replayAbort?.abort();view.scene?.dispose();view.replay?.dispose();view.article.remove()}
+function pauseForScroll(){
+ if(!scrolling){scrolling=true;for(const view of scenes.values())updateActivity(view)}
+ clearTimeout(scrollTimer);scrollTimer=setTimeout(()=>{scrolling=false;for(const view of scenes.values())updateActivity(view)},180);
+}
+window.addEventListener('scroll',pauseForScroll,{passive:true});
+window.addEventListener('touchmove',pauseForScroll,{passive:true});
+function removeView(view){observer?.unobserve(view.canvas);view.replayAbort?.abort();view.scene?.dispose();view.replay?.dispose();view.article.remove()}
 function clearViews(){for(const view of scenes.values())removeView(view);scenes.clear()}
 async function loadReplays(view){
  view.replayAbort?.abort();const abort=view.replayAbort=new AbortController();view.replayLoad.disabled=true;view.replayLoad.textContent='正在读取回放…';
@@ -176,9 +187,9 @@ function render(){
   if(!view){
    const article=el('article','box'+(water?' water-box':'')),head=el('div','box-head'),rank=el('span','rank'),heading=el('div','heading'),title=el('h3',''),id=el('div','box-id','ID / '+entry.id),score=el('div','score'),points=el('strong',''),sceneWrap=el('div','scene-wrap'),canvas=document.createElement('canvas'),phase=el('span','phase'),metrics=el('div','box-metrics'),quality=el('div','quality'),replayContainer=el('div','replay-container'),replayLoad=el('button','replay-load'),foot=el('div','box-foot'),time=el('time','');
    canvas.width=800;canvas.height=500;canvas.setAttribute('role','img');score.append(points,el('span','','生态积分'));heading.append(title,id);head.append(rank,heading,score);sceneWrap.append(canvas,phase);foot.append(el('span','',water?'WATER / 水生生态':'LAND / 陆生生态'),time);article.append(head,sceneWrap,metrics,quality,replayLoad,replayContainer,foot);
-   view={article,rank,title,points,canvas,phase,metrics,quality,time,replayContainer,replayLoad,createScene:water?createWaterScene:createScene,scene:null,replay:null,visible:!observer,entry};scenes.set(entry.id,view);elementViews.set(article,view);observer?.observe(article);replayLoad.type='button';replayLoad.onclick=()=>void loadReplays(view);
+   view={article,rank,title,points,canvas,phase,metrics,quality,time,replayContainer,replayLoad,createScene:water?createWaterScene:createScene,scene:null,replay:null,visible:!observer,entry};scenes.set(entry.id,view);elementViews.set(canvas,view);observer?.observe(canvas);replayLoad.type='button';replayLoad.onclick=()=>void loadReplays(view);
   }
-  view.entry=entry;const state=entry.state,rank=entry.rank;view.article.dataset.rank=rank;view.rank.textContent=String(rank).padStart(2,'0');view.title.textContent=state.name??entry.id;view.points.textContent=Number(entry.score).toLocaleString('zh-CN',{maximumFractionDigits:1});view.canvas.setAttribute('aria-label',view.title.textContent+'的'+(water?'水箱':'地箱')+'场景');view.phase.textContent=entry.phase==='night'?'夜晚':'白天';
+  if(view.entry!==entry)view.dirty=true;view.entry=entry;const state=entry.state,rank=entry.rank;view.article.dataset.rank=rank;view.rank.textContent=String(rank).padStart(2,'0');view.title.textContent=state.name??entry.id;view.points.textContent=Number(entry.score).toLocaleString('zh-CN',{maximumFractionDigits:1});view.canvas.setAttribute('aria-label',view.title.textContent+'的'+(water?'水箱':'地箱')+'场景');view.phase.textContent=entry.phase==='night'?'夜晚':'白天';
   const metrics=water?[['水生植物',state.plants.length],['鱼 / 鱼卵',state.fish.length+' / '+(state.eggs?.length??0)],['饲料',state.food.reduce((sum,food)=>sum+food.portions,0)]]:[['植物',state.plants.length],['虫子',state.bugs.length],['种子 / 虫卵',state.seeds.length+' / '+(state.eggs?.length??0)]];
   view.metrics.replaceChildren(...metrics.map(([label,value])=>{const node=el('div','metric',label);node.append(el('strong','',String(value)));return node}));view.quality.hidden=!water;
   if(!water){view.quality.hidden=!(state.nests?.length);view.quality.textContent=(state.nests??[]).map(nest=>'蚁巢 '+nest.depth+' 层 · 储粮 '+nest.food+'/'+(nest.depth*20)).join(' · ')}
@@ -228,7 +239,7 @@ $('coins-toggle').addEventListener('click',async()=>{
  finally{coinsLoading=false}
 });
 void loadAnnouncements();void load();
-window.addEventListener('pagehide',event=>{if(event.persisted)return;requestVersion++;requestAbort?.abort();clearTimeout(searchTimer);clearInterval(announcementTimer);clearInterval(pollTimer);observer?.disconnect();sort.dispose();clearViews();for(const animation of animations)animation.cancel()});
+window.addEventListener('pagehide',event=>{if(event.persisted)return;requestVersion++;requestAbort?.abort();clearTimeout(searchTimer);clearTimeout(scrollTimer);window.removeEventListener('scroll',pauseForScroll);window.removeEventListener('touchmove',pauseForScroll);clearInterval(announcementTimer);clearInterval(pollTimer);observer?.disconnect();sort.dispose();clearViews();for(const animation of animations)animation.cancel()});
 </script>
 <script type="module">
 const feedbackToggle=document.getElementById('feedback-toggle'),feedbackPanel=document.getElementById('feedback-panel'),feedbackText=document.getElementById('feedback-text'),feedbackContact=document.getElementById('feedback-contact'),feedbackStatus=document.getElementById('feedback-status'),feedbackSubmit=document.getElementById('feedback-submit');

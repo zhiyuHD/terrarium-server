@@ -1,11 +1,16 @@
-// src/progression.ts
+// packages/cortico-world-terrarium/src/scoring.ts
+function curvedScore(base) {
+  return Math.round(base <= 200 ? base : 200 + 200 * Math.log(base / 200));
+}
+
+// packages/cortico-world-terrarium/src/progression.ts
 var TERRARIUM_LEVELS = [
   { level: 1, requiredScore: 0, size: 5, organisms: 12, collection: 48 },
   { level: 2, requiredScore: 120, size: 6, organisms: 18, collection: 64 },
-  { level: 3, requiredScore: 260, size: 7, organisms: 24, collection: 96 },
-  { level: 4, requiredScore: 420, size: 8, organisms: 32, collection: 128 }
+  { level: 3, requiredScore: curvedScore(260), size: 7, organisms: 24, collection: 96 },
+  { level: 4, requiredScore: curvedScore(420), size: 8, organisms: 32, collection: 128 }
 ];
-var TERRARIUM_WATER_LEVELS = TERRARIUM_LEVELS.map((level, index) => ({ ...level, requiredScore: [0, 120, 240, 360][index] }));
+var TERRARIUM_WATER_LEVELS = TERRARIUM_LEVELS.map((level, index) => ({ ...level, requiredScore: [0, 120, 240, 360].map(curvedScore)[index] }));
 function expansionLevels(state) {
   return "kind" in state && state.kind === "water" ? TERRARIUM_WATER_LEVELS : TERRARIUM_LEVELS;
 }
@@ -16,7 +21,7 @@ function nearFacility(state, kind, x, y) {
   return state.facilities?.some((f) => f.kind === kind && f.enabled && Math.abs(f.x - x) + Math.abs(f.y - y) <= 1) ?? false;
 }
 
-// src/merchant.ts
+// packages/cortico-world-terrarium/src/merchant.ts
 var TERRARIUM_POTS = {
   clay: { name: "\u7D20\u9676\u76C6", price: 24, effect: "\u6696\u9676\u8272\u88C5\u9970\uFF0C\u65E0\u989D\u5916\u6548\u679C", growth: 1, evaporation: 1, light: 0, recovery: 0, drain: 0 },
   porcelain: { name: "\u9752\u74F7\u76C6", price: 40, effect: "\u9752\u74F7\u4E0E\u7EC6\u53F6\u7EB9\u88C5\u9970\uFF0C\u65E0\u989D\u5916\u6548\u679C", growth: 1, evaporation: 1, light: 0, recovery: 0, drain: 0 },
@@ -40,7 +45,7 @@ var TERRARIUM_MERCHANT_TOOL_DECL = {
   parameters: { type: "object", additionalProperties: false, properties: { action: { type: "string", enum: ["status", "sell", "sell_fruit", "buy", "place", "remove"] }, species: { type: "string", enum: ["tomato", "strawberry"] }, portions: { type: "integer", minimum: 1, maximum: 1e4 }, id: { type: "string" }, pot: { type: "string", enum: Object.keys(TERRARIUM_POTS) }, x: { type: "integer", minimum: 0 }, y: { type: "integer", minimum: 0 } } }
 };
 
-// src/habitat.ts
+// packages/cortico-world-terrarium/src/habitat.ts
 var TERRARIUM_PLANT_RECOVERED_HEALTH = 35;
 var TERRARIUM_PLANT_REQUIREMENTS = {
   tomato: { minMoisture: 35, maxMoisture: 75, minLight: 0.7, maxLight: 1 },
@@ -83,7 +88,7 @@ function flowerStage(plant) {
   if ((plant.growthHours ?? 0) >= TERRARIUM_FLOWER_BUD_HOURS) return "bud";
 }
 
-// src/garden.ts
+// packages/cortico-world-terrarium/src/garden.ts
 var TERRARIUM_CROPS = {
   tomato: { name: "\u756A\u8304", firstHours: 18, intervalHours: 8, portions: 3, price: 3 },
   strawberry: { name: "\u8349\u8393", firstHours: 12, intervalHours: 6, portions: 2, price: 4 }
@@ -93,13 +98,86 @@ function cropRounds(plant) {
   return crop ? Math.max(0, Math.floor(((plant.fruitGrowthHours ?? 0) - crop.firstHours) / crop.intervalHours) + 1) : 0;
 }
 
-// src/flight.ts
+// packages/cortico-world-terrarium/src/flight.ts
 var TERRARIUM_FLY_SPECIES = ["fruit_fly", "mosquito", "moth", "bee", "butterfly"];
 function isFlying(species) {
   return TERRARIUM_FLY_SPECIES.includes(species);
 }
 
-// ../../scratch/full-garden/renderer-consumer/package/dist/geometry.js
+// packages/terrarium-renderer/src/animation.ts
+var animations = /* @__PURE__ */ new Set();
+var controls = /* @__PURE__ */ new WeakMap();
+var frame = 0;
+function schedule() {
+  if (!frame && animations.size) frame = requestAnimationFrame(render);
+}
+function render(now) {
+  frame = 0;
+  for (const animation of animations) {
+    const elapsed = now - animation.last;
+    if (elapsed + 0.01 < animation.interval) continue;
+    animation.last = Number.isFinite(elapsed) ? now - elapsed % animation.interval : now;
+    try {
+      animation.draw(now);
+    } catch (error) {
+      animations.delete(animation);
+      setTimeout(() => {
+        throw error;
+      }, 0);
+    }
+  }
+  schedule();
+}
+function remove(animation) {
+  animations.delete(animation);
+  if (!animations.size && frame) {
+    cancelAnimationFrame(frame);
+    frame = 0;
+  }
+}
+function createSceneAnimation(canvas, draw) {
+  const animation = { draw, interval: 1e3 / 30, last: -Infinity };
+  let active = true, ready = false, disposed = false;
+  const control = {
+    request() {
+      if (disposed) return;
+      ready = true;
+      animation.last = -Infinity;
+      if (active) {
+        animations.add(animation);
+        schedule();
+      }
+    },
+    setActive(value) {
+      if (disposed || active === value) return;
+      active = value;
+      if (active && ready) {
+        animation.last = -Infinity;
+        animations.add(animation);
+        schedule();
+      } else remove(animation);
+    },
+    setFrameRate(fps) {
+      if (!Number.isFinite(fps) || fps < 1 || fps > 60) throw new RangeError("Frame rate must be between 1 and 60");
+      animation.interval = 1e3 / fps;
+    },
+    dispose() {
+      disposed = true;
+      remove(animation);
+      controls.delete(canvas);
+    }
+  };
+  controls.set(canvas, control);
+  return control;
+}
+function setSceneActive(canvas, active) {
+  controls.get(canvas)?.setActive(active);
+}
+function setSceneFrameRate(canvas, fps) {
+  controls.get(canvas)?.setFrameRate(fps);
+}
+
+// packages/terrarium-renderer/src/geometry.ts
 var LAND_SURFACE = { x: 84, y: 204, width: 632, height: 216 };
 var WATER_SURFACE = { x: 90, y: 128, width: 620, height: 286 };
 function cellPosition(surface, x, y, size) {
@@ -112,12 +190,12 @@ function residentScale(size) {
   return 5 / size;
 }
 
-// ../../scratch/full-garden/renderer-consumer/package/dist/types.js
+// packages/terrarium-renderer/src/types.ts
 function sceneSize(scene) {
   return scene.gridSize ?? 5;
 }
 
-// ../../scratch/full-garden/renderer-consumer/package/dist/plant-tooltip.js
+// packages/terrarium-renderer/src/plant-tooltip.ts
 var names = { fern: "\u8568\u7C7B", clover: "\u4E09\u53F6\u8349", moss: "\u82D4\u85D3", basil: "\u7F57\u52D2", bean: "\u8C46\u82D7", sunflower: "\u5411\u65E5\u8475", mint: "\u8584\u8377", daisy: "\u96CF\u83CA", lavender: "\u85B0\u8863\u8349", tomato: "\u756A\u8304", strawberry: "\u8349\u8393", mushroom: "\u8611\u83C7" };
 function createPlantTooltip(canvas, language) {
   let state;
@@ -126,8 +204,7 @@ function createPlantTooltip(canvas, language) {
   tooltip.hidden = true;
   Object.assign(tooltip.style, { position: "fixed", zIndex: "100", pointerEvents: "none", padding: "9px 13px", borderRadius: "14px", background: "#293b2d", color: "#f2f0d9", font: "13px sans-serif", boxShadow: "0 4px 14px #13201430", maxWidth: "250px" });
   const show = (event) => {
-    if (!state)
-      return;
+    if (!state) return;
     const rect = canvas.getBoundingClientRect(), x = (event.clientX - rect.left) * 800 / rect.width, y = (event.clientY - rect.top) * 500 / rect.height, size = sceneSize(state), scale = residentScale(size);
     const plant = [...state.plants].reverse().find((p) => {
       const point = plotPosition(p.x, p.y, size);
@@ -138,8 +215,7 @@ function createPlantTooltip(canvas, language) {
       return;
     }
     tooltip.textContent = `${language === "zh" ? names[plant.species] ?? plant.species : plant.species} \xB7 ${plant.id} (${plant.x},${plant.y}) \xB7 ${language === "zh" ? "\u5065\u5EB7" : "Health"} ${Math.round(plant.health ?? 100)}%${plant.fruitReady ? language === "zh" ? " \xB7 \u679C\u5B9E\u6210\u719F" : " \xB7 Ripe fruit" : ""}`;
-    if (!tooltip.isConnected)
-      document.body.append(tooltip);
+    if (!tooltip.isConnected) document.body.append(tooltip);
     tooltip.hidden = false;
     tooltip.style.left = `${Math.max(4, Math.min(window.innerWidth - 260, event.clientX + 12))}px`;
     tooltip.style.top = `${Math.max(4, event.clientY - 54)}px`;
@@ -161,7 +237,7 @@ function createPlantTooltip(canvas, language) {
   } };
 }
 
-// ../../scratch/full-garden/renderer-consumer/package/dist/plant-appearance.js
+// packages/terrarium-renderer/src/plant-appearance.ts
 function blend(from, to, amount) {
   const color = (hex, offset) => Number.parseInt(hex.slice(offset, offset + 2), 16);
   return "#" + [1, 3, 5].map((offset) => Math.round(color(from, offset) * (1 - amount) + color(to, offset) * amount).toString(16).padStart(2, "0")).join("");
@@ -186,8 +262,7 @@ function drawLeaf(g, appearance, x, y, rx, ry, angle, index, shape = "oval") {
   g.rotate(angle);
   const outline = () => {
     g.beginPath();
-    if (shape === "oval")
-      g.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+    if (shape === "oval") g.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
     else {
       g.moveTo(-rx, 0);
       g.bezierCurveTo(-rx * 0.4, -ry * 1.4, rx * 0.65, -ry, rx, 0);
@@ -209,8 +284,7 @@ function drawLeaf(g, appearance, x, y, rx, ry, angle, index, shape = "oval") {
   }
   g.fillStyle = index % 2 ? appearance.leaf : appearance.youngLeaf;
   g.fill("evenodd");
-  if (holes || appearance.spots)
-    g.clip("evenodd");
+  if (holes || appearance.spots) g.clip("evenodd");
   g.strokeStyle = appearance.vein;
   g.lineWidth = 0.8;
   g.beginPath();
@@ -226,12 +300,10 @@ function drawLeaf(g, appearance, x, y, rx, ry, angle, index, shape = "oval") {
   g.restore();
 }
 
-// ../../scratch/full-garden/renderer-consumer/package/dist/garden.js
+// packages/terrarium-renderer/src/garden.ts
 function drawGardenPlant(g, p, x, base, night, flowersOnly) {
-  if (flowersOnly)
-    return false;
-  if (!["tomato", "strawberry", "mushroom", "fern", "clover", "moss", "basil", "bean"].includes(p.species))
-    return false;
+  if (flowersOnly) return false;
+  if (!["tomato", "strawberry", "mushroom", "fern", "clover", "moss", "basil", "bean"].includes(p.species)) return false;
   const a = plantAppearance(p, night), h = 16 + p.stage * 17;
   g.save();
   g.translate(x, base);
@@ -239,44 +311,40 @@ function drawGardenPlant(g, p, x, base, night, flowersOnly) {
   g.strokeStyle = a.stem;
   g.lineWidth = 2.5;
   if (p.species === "mushroom") {
-    if (!flowersOnly)
-      for (const [dx, scale] of [[-12, 0.65], [8, 1], [20, 0.5]]) {
-        g.save();
-        g.translate(dx, 0);
-        g.scale(scale, scale);
-        g.fillStyle = "#ead8b8";
-        g.beginPath();
-        g.roundRect(-4, -h, 8, h, 4);
-        g.fill();
-        g.fillStyle = (p.health ?? 100) < 40 ? "#a18b65" : "#b96f49";
-        g.beginPath();
-        g.ellipse(0, -h, 19, 12, 0, Math.PI, Math.PI * 2);
-        g.quadraticCurveTo(0, -h + 7, -19, -h);
-        g.fill();
-        g.restore();
-      }
+    if (!flowersOnly) for (const [dx, scale] of [[-12, 0.65], [8, 1], [20, 0.5]]) {
+      g.save();
+      g.translate(dx, 0);
+      g.scale(scale, scale);
+      g.fillStyle = "#ead8b8";
+      g.beginPath();
+      g.roundRect(-4, -h, 8, h, 4);
+      g.fill();
+      g.fillStyle = (p.health ?? 100) < 40 ? "#a18b65" : "#b96f49";
+      g.beginPath();
+      g.ellipse(0, -h, 19, 12, 0, Math.PI, Math.PI * 2);
+      g.quadraticCurveTo(0, -h + 7, -19, -h);
+      g.fill();
+      g.restore();
+    }
   } else if (p.species === "moss") {
-    if (!flowersOnly)
-      for (let i = 0; i < 9 + p.stage * 3; i++) {
-        g.fillStyle = i % 2 ? a.leaf : a.youngLeaf;
-        g.beginPath();
-        g.ellipse((i % 6 - 2.5) * 8, -Math.floor(i / 6) * 6, 7, 6, 0, 0, Math.PI * 2);
-        g.fill();
-      }
+    if (!flowersOnly) for (let i = 0; i < 9 + p.stage * 3; i++) {
+      g.fillStyle = i % 2 ? a.leaf : a.youngLeaf;
+      g.beginPath();
+      g.ellipse((i % 6 - 2.5) * 8, -Math.floor(i / 6) * 6, 7, 6, 0, 0, Math.PI * 2);
+      g.fill();
+    }
   } else if (p.species === "fern") {
-    if (!flowersOnly)
-      for (const side of [-1, 0, 1]) {
-        const top = -h * (side ? 0.75 : 1), end = side * 24;
-        g.beginPath();
-        g.moveTo(0, 0);
-        g.quadraticCurveTo(end, top * 0.5, end, top);
-        g.stroke();
-        for (let i = 1; i < 6 + p.stage; i++) {
-          const t = i / (6 + p.stage);
-          for (const d of [-1, 1])
-            drawLeaf(g, a, end * t + d * (12 * (1 - t) + 3), top * t, 12 * (1 - t) + 4, 3, -d * 0.5, i, "pointed");
-        }
+    if (!flowersOnly) for (const side of [-1, 0, 1]) {
+      const top = -h * (side ? 0.75 : 1), end = side * 24;
+      g.beginPath();
+      g.moveTo(0, 0);
+      g.quadraticCurveTo(end, top * 0.5, end, top);
+      g.stroke();
+      for (let i = 1; i < 6 + p.stage; i++) {
+        const t = i / (6 + p.stage);
+        for (const d of [-1, 1]) drawLeaf(g, a, end * t + d * (12 * (1 - t) + 3), top * t, 12 * (1 - t) + 4, 3, -d * 0.5, i, "pointed");
       }
+    }
   } else if (p.species === "strawberry" || p.species === "clover") {
     for (let i = 0; i < 3 + p.stage; i++) {
       const dx = (i % 3 - 1) * 17, dy = -12 - Math.floor(i / 3) * 14;
@@ -285,8 +353,7 @@ function drawGardenPlant(g, p, x, base, night, flowersOnly) {
         g.moveTo(0, 0);
         g.lineTo(dx, dy);
         g.stroke();
-        for (const angle of [-0.8, 0, 0.8])
-          drawLeaf(g, a, dx + Math.sin(angle) * 8, dy - 6, 8, p.species === "clover" ? 7 : 5, angle, i);
+        for (const angle of [-0.8, 0, 0.8]) drawLeaf(g, a, dx + Math.sin(angle) * 8, dy - 6, 8, p.species === "clover" ? 7 : 5, angle, i);
       }
       if (p.species === "strawberry" && p.fruitReady && i % 2 === 0) {
         g.fillStyle = "#e7685a";
@@ -314,17 +381,16 @@ function drawGardenPlant(g, p, x, base, night, flowersOnly) {
         drawLeaf(g, a, side * 12, -8 - i * h / (4 + p.stage), p.species === "bean" ? 14 : 11, p.species === "basil" ? 9 : 5, -side * 0.5, i, p.species === "tomato" ? "pointed" : void 0);
       }
     }
-    if (p.species === "tomato" && p.fruitReady)
-      for (const [dx, dy] of [[-9, -h * 0.55], [11, -h * 0.8], [-5, -h]]) {
-        g.fillStyle = night ? "#b95c43" : "#e5654d";
-        g.beginPath();
-        g.arc(dx, dy, 7, 0, Math.PI * 2);
-        g.fill();
-        g.fillStyle = "#72914e";
-        g.beginPath();
-        g.ellipse(dx, dy - 6, 5, 2, 0, 0, Math.PI * 2);
-        g.fill();
-      }
+    if (p.species === "tomato" && p.fruitReady) for (const [dx, dy] of [[-9, -h * 0.55], [11, -h * 0.8], [-5, -h]]) {
+      g.fillStyle = night ? "#b95c43" : "#e5654d";
+      g.beginPath();
+      g.arc(dx, dy, 7, 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = "#72914e";
+      g.beginPath();
+      g.ellipse(dx, dy - 6, 5, 2, 0, 0, Math.PI * 2);
+      g.fill();
+    }
   }
   g.restore();
   return true;
@@ -392,7 +458,7 @@ function drawDecomposer(g, species, x, y, night) {
   g.restore();
 }
 
-// ../../scratch/full-garden/renderer-consumer/package/dist/pots.js
+// packages/terrarium-renderer/src/pots.ts
 var finishes = {
   clay: { body: "#bc7350", rim: "#e3a47a", motif: "lines" },
   porcelain: { body: "#79aaa0", rim: "#b8d8c8", motif: "leaf" },
@@ -407,8 +473,7 @@ var finishes = {
 };
 function drawPot(g, pot, x, y, scale, night) {
   const f = finishes[pot.kind];
-  if (!f)
-    return;
+  if (!f) return;
   g.save();
   g.translate(x, y);
   g.scale(scale, scale);
@@ -493,10 +558,9 @@ function drawPot(g, pot, x, y, scale, night) {
   g.restore();
 }
 
-// ../../scratch/full-garden/renderer-consumer/package/dist/pollinators.js
+// packages/terrarium-renderer/src/pollinators.ts
 function drawMeadowPlant(g, plant, x, base, night, flowersOnly = false) {
-  if (plant.species !== "daisy" && plant.species !== "lavender")
-    return false;
+  if (plant.species !== "daisy" && plant.species !== "lavender") return false;
   const appearance = plantAppearance(plant, night), height = 15 + plant.stage * 17;
   g.save();
   g.translate(x, base);
@@ -510,11 +574,9 @@ function drawMeadowPlant(g, plant, x, base, night, flowersOnly = false) {
       g.moveTo(0, 0);
       g.quadraticCurveTo(tx * 0.6, top * 0.5, tx, top);
       g.stroke();
-      for (const direction of [-1, 1])
-        drawLeaf(g, appearance, tx * 0.5 + direction * 8, top * 0.5 + appearance.wilt * 6, plant.species === "lavender" ? 10 : 12, plant.species === "lavender" ? 2 : 4, direction * -0.5, side + direction + 3, "pointed");
+      for (const direction of [-1, 1]) drawLeaf(g, appearance, tx * 0.5 + direction * 8, top * 0.5 + appearance.wilt * 6, plant.species === "lavender" ? 10 : 12, plant.species === "lavender" ? 2 : 4, direction * -0.5, side + direction + 3, "pointed");
     }
-    if (!plant.flower)
-      continue;
+    if (!plant.flower) continue;
     if (plant.species === "daisy") {
       if (plant.flower === "bloom") {
         for (let i = 0; i < 12; i++) {
@@ -539,13 +601,12 @@ function drawMeadowPlant(g, plant, x, base, night, flowersOnly = false) {
         g.fill();
       }
     } else {
-      for (let row = 0; row < (plant.flower === "bloom" ? 6 : 3); row++)
-        for (const direction of [-1, 1]) {
-          g.fillStyle = plant.flower === "bud" ? "#9c96b8" : row % 2 ? "#c6b4e9" : "#9275bb";
-          g.beginPath();
-          g.ellipse(tx + direction * (3.5 - row * 0.3), top - row * 4, 3, 3.6, direction * 0.65, 0, Math.PI * 2);
-          g.fill();
-        }
+      for (let row = 0; row < (plant.flower === "bloom" ? 6 : 3); row++) for (const direction of [-1, 1]) {
+        g.fillStyle = plant.flower === "bud" ? "#9c96b8" : row % 2 ? "#c6b4e9" : "#9275bb";
+        g.beginPath();
+        g.ellipse(tx + direction * (3.5 - row * 0.3), top - row * 4, 3, 3.6, direction * 0.65, 0, Math.PI * 2);
+        g.fill();
+      }
     }
   }
   g.restore();
@@ -612,14 +673,11 @@ function drawPollinator(g, species, x, y, night) {
   g.restore();
 }
 
-// ../../scratch/full-garden/renderer-consumer/package/dist/neighbors.js
+// packages/terrarium-renderer/src/neighbors.ts
 function drawNeighborPlant(g, plant, x, base, night, flowersOnly = false) {
-  if (drawGardenPlant(g, plant, x, base, night, flowersOnly))
-    return true;
-  if (drawMeadowPlant(g, plant, x, base, night, flowersOnly))
-    return true;
-  if (plant.species !== "sunflower" && plant.species !== "mint")
-    return false;
+  if (drawGardenPlant(g, plant, x, base, night, flowersOnly)) return true;
+  if (drawMeadowPlant(g, plant, x, base, night, flowersOnly)) return true;
+  if (plant.species !== "sunflower" && plant.species !== "mint") return false;
   const height = 13 + plant.stage * 20;
   g.save();
   g.translate(x, base);
@@ -678,14 +736,13 @@ function drawNeighborPlant(g, plant, x, base, night, flowersOnly = false) {
         g.lineTo(0, -10);
         g.stroke();
       } else {
-        for (let ring = 0; ring < 2; ring++)
-          for (let i = 0; i < 13; i++) {
-            const a = i * Math.PI * 2 / 13 + ring * 0.2;
-            g.fillStyle = night ? ["#bea552", "#d2b963"][ring] : ["#e7ab3b", "#f5ca59"][ring];
-            g.beginPath();
-            g.ellipse(Math.cos(a) * 17, Math.sin(a) * 17, 12 - ring * 2, 4.7, a, 0, Math.PI * 2);
-            g.fill();
-          }
+        for (let ring = 0; ring < 2; ring++) for (let i = 0; i < 13; i++) {
+          const a = i * Math.PI * 2 / 13 + ring * 0.2;
+          g.fillStyle = night ? ["#bea552", "#d2b963"][ring] : ["#e7ab3b", "#f5ca59"][ring];
+          g.beginPath();
+          g.ellipse(Math.cos(a) * 17, Math.sin(a) * 17, 12 - ring * 2, 4.7, a, 0, Math.PI * 2);
+          g.fill();
+        }
         g.fillStyle = "#705036";
         g.beginPath();
         g.arc(0, 0, 12, 0, Math.PI * 2);
@@ -710,21 +767,18 @@ function drawNeighborPlant(g, plant, x, base, night, flowersOnly = false) {
         g.moveTo(0, 0);
         g.quadraticCurveTo(endX, top * 0.4, endX, top);
         g.stroke();
-        for (let level = 0; level <= plant.stage; level++)
-          for (const direction of [-1, 1]) {
-            const cy = -8 + top * (0.18 + level * 0.2), cx = endX * Math.min(1, cy / top * 1.3);
-            const tipX = cx + direction * (13 + plant.stage * 1.5), tipY = cy - 9;
-            drawLeaf(g, appearance, (cx + tipX) / 2, (cy + tipY) / 2 + appearance.wilt * 4, 10 + plant.stage, 6, -direction * (0.4 - appearance.wilt * 0.8), level + (side + 1) * 4 + (direction + 1) / 2, "pointed");
-          }
+        for (let level = 0; level <= plant.stage; level++) for (const direction of [-1, 1]) {
+          const cy = -8 + top * (0.18 + level * 0.2), cx = endX * Math.min(1, cy / top * 1.3);
+          const tipX = cx + direction * (13 + plant.stage * 1.5), tipY = cy - 9;
+          drawLeaf(g, appearance, (cx + tipX) / 2, (cy + tipY) / 2 + appearance.wilt * 4, 10 + plant.stage, 6, -direction * (0.4 - appearance.wilt * 0.8), level + (side + 1) * 4 + (direction + 1) / 2, "pointed");
+        }
       }
-      if (plant.flower)
-        for (let i = 0; i < 4; i++)
-          for (const direction of [-1, 1]) {
-            g.fillStyle = plant.flower === "bud" ? "#a79cc1" : night ? "#b8abc9" : "#d4bde5";
-            g.beginPath();
-            g.ellipse(endX + direction * 4, top - i * 5, 3, plant.flower === "bud" ? 3 : 2, direction * 0.4, 0, Math.PI * 2);
-            g.fill();
-          }
+      if (plant.flower) for (let i = 0; i < 4; i++) for (const direction of [-1, 1]) {
+        g.fillStyle = plant.flower === "bud" ? "#a79cc1" : night ? "#b8abc9" : "#d4bde5";
+        g.beginPath();
+        g.ellipse(endX + direction * 4, top - i * 5, 3, plant.flower === "bud" ? 3 : 2, direction * 0.4, 0, Math.PI * 2);
+        g.fill();
+      }
     }
   }
   g.restore();
@@ -736,13 +790,12 @@ function drawLadybug(g, x, y, night) {
   g.strokeStyle = "#393c37";
   g.lineWidth = 1.5;
   g.lineCap = "round";
-  for (const side of [-1, 1])
-    for (const dy of [-5, 0, 5]) {
-      g.beginPath();
-      g.moveTo(side * 7, dy);
-      g.lineTo(side * 12, dy + 3);
-      g.stroke();
-    }
+  for (const side of [-1, 1]) for (const dy of [-5, 0, 5]) {
+    g.beginPath();
+    g.moveTo(side * 7, dy);
+    g.lineTo(side * 12, dy + 3);
+    g.stroke();
+  }
   g.fillStyle = "#343d36";
   g.beginPath();
   g.ellipse(0, -7, 6, 5, 0, 0, Math.PI * 2);
@@ -775,13 +828,11 @@ function drawLadybug(g, x, y, night) {
   g.restore();
 }
 
-// ../../scratch/full-garden/renderer-consumer/package/dist/flowers.js
+// packages/terrarium-renderer/src/flowers.ts
 function drawPlantFlowers(g, plant, x, y, night) {
   const stage = plant.flower;
-  if (!stage && !plant.seedHead)
-    return;
-  if (drawNeighborPlant(g, { ...plant, stage: 3, dry: false }, x, y + 73, night, true))
-    return;
+  if (!stage && !plant.seedHead) return;
+  if (drawNeighborPlant(g, { ...plant, stage: 3, dry: false }, x, y + 73, night, true)) return;
   g.save();
   g.translate(x, y);
   g.lineCap = "round";
@@ -815,8 +866,7 @@ function drawPlantFlowers(g, plant, x, y, night) {
       g.save();
       g.translate(tx, ty);
       g.scale(scale, scale);
-      if (stage === "bud" || night)
-        bud(0, 0, "#d49cb4");
+      if (stage === "bud" || night) bud(0, 0, "#d49cb4");
       else {
         petal(0, 2, 13, 11, 0, "#c47b9a");
         for (let ring = 0; ring < 3; ring++) {
@@ -831,25 +881,22 @@ function drawPlantFlowers(g, plant, x, y, night) {
     }
   } else if (plant.species === "basil") {
     stem(0, -49);
-    for (let level = 0; level < 5; level++)
-      for (const side of [-1, 1]) {
-        const px = side * (8 - level), py = -7 - level * 9;
-        stem(px, py + 2);
-        if (stage === "bud" || night)
-          bud(px, py, "#b7a8ce");
-        else {
-          petal(px, py, 5, 4, side * 0.6, "#c8b5de");
-          petal(px + side * 2, py + 2, 5, 3, -side * 0.25, "#f8efff");
-          petal(px - side, py - 2, 3, 4, side * 0.3, "#eee4f7");
-          petal(px + side * 3, py + 1, 1.5, 1.5, 0, "#d3a56b");
-        }
+    for (let level = 0; level < 5; level++) for (const side of [-1, 1]) {
+      const px = side * (8 - level), py = -7 - level * 9;
+      stem(px, py + 2);
+      if (stage === "bud" || night) bud(px, py, "#b7a8ce");
+      else {
+        petal(px, py, 5, 4, side * 0.6, "#c8b5de");
+        petal(px + side * 2, py + 2, 5, 3, -side * 0.25, "#f8efff");
+        petal(px - side, py - 2, 3, 4, side * 0.3, "#eee4f7");
+        petal(px + side * 3, py + 1, 1.5, 1.5, 0, "#d3a56b");
       }
+    }
     bud(0, -51, "#c3b7d4");
   } else {
     for (const [tx, ty] of [[-15, -18], [20, -32], [31, -5]]) {
       stem(tx, ty + 6);
-      if (stage === "bud" || night)
-        bud(tx, ty, "#d69ab1");
+      if (stage === "bud" || night) bud(tx, ty, "#d69ab1");
       else {
         petal(tx, ty - 4, 12, 10, -0.15, "#d88fac");
         petal(tx, ty - 7, 9, 7, -0.15, "#f7cbd9");
@@ -863,7 +910,7 @@ function drawPlantFlowers(g, plant, x, y, night) {
   g.restore();
 }
 
-// ../../scratch/full-garden/renderer-consumer/package/dist/nest-viewer.js
+// packages/terrarium-renderer/src/nest-viewer.ts
 var NEST_SIZE = 4;
 var STYLE = `
 .tn-dialog{box-sizing:border-box;width:min(720px,calc(100vw - 24px));max-height:calc(100dvh - 32px);padding:0;border:1px solid #c0ac85;border-radius:24px;background:#f7f1e4;color:#473c2e;box-shadow:0 30px 120px #17170e55;font:14px/1.5 system-ui,sans-serif;overflow:auto}
@@ -926,8 +973,7 @@ function createNestViewer(canvas, language = "zh") {
   const el = (tag, cls, label) => {
     const node2 = doc.createElement(tag);
     node2.className = cls;
-    if (label !== void 0)
-      node2.textContent = label;
+    if (label !== void 0) node2.textContent = label;
     return node2;
   };
   const toolbar = el("div", "tn-toolbar"), dialog = el("dialog", "tn-dialog");
@@ -956,7 +1002,7 @@ function createNestViewer(canvas, language = "zh") {
     cell.type = "button";
     cell.addEventListener("click", () => {
       cellIndex = index;
-      render();
+      render2();
     });
     return cell;
   };
@@ -964,17 +1010,15 @@ function createNestViewer(canvas, language = "zh") {
   const roomName = (x, y) => x === 0 && y === 0 ? text.entrance : x === 3 && y === 0 ? text.storage : x === 2 && y === 2 ? text.nursery : text.room;
   const remainingTime = (hatchesAtMs) => {
     const minutes = Math.ceil((hatchesAtMs - (recordedAtMs ?? Date.now())) / 6e4);
-    if (minutes <= 0)
-      return zh ? "\u7B49\u5F85\u5B75\u5316" : "Awaiting hatching";
+    if (minutes <= 0) return zh ? "\u7B49\u5F85\u5B75\u5316" : "Awaiting hatching";
     const hours = Math.floor(minutes / 60), rest = minutes % 60;
     const duration = zh ? `${hours ? `${hours} \u5C0F\u65F6` : ""}${rest ? `${hours ? " " : ""}${rest} \u5206\u949F` : ""}` : `${hours ? `${hours}h` : ""}${rest ? `${hours ? " " : ""}${rest}m` : ""}`;
     return zh ? `\u9884\u8BA1 ${duration}\u540E\u5B75\u5316` : `Hatches in about ${duration}`;
   };
-  const render = () => {
+  const render2 = () => {
     const nest = state?.nests?.find((nest2) => nest2.id === selectedId);
     if (!state || !nest) {
-      if (dialog.open)
-        dialog.close();
+      if (dialog.open) dialog.close();
       return;
     }
     const size = nest.size ?? NEST_SIZE;
@@ -1012,23 +1056,17 @@ function createNestViewer(canvas, language = "zh") {
       if (eggs2.length) {
         const cluster = el("span", "tn-eggs");
         cluster.setAttribute("aria-hidden", "true");
-        for (let i = 0; i < Math.min(3, eggs2.length); i++)
-          cluster.append(el("span", "tn-egg"));
+        for (let i = 0; i < Math.min(3, eggs2.length); i++) cluster.append(el("span", "tn-egg"));
         occupants.append(cluster);
       }
-      if (x === 3 && y === 0 && nest.food)
-        occupants.append(el("span", "tn-food", `\u25CF ${nest.food}`));
+      if (x === 3 && y === 0 && nest.food) occupants.append(el("span", "tn-food", `\u25CF ${nest.food}`));
       cell.replaceChildren(el("span", "tn-cell-label", `${roomName(x, y)} ${x},${y}`), occupants, el("span", "tn-cell-count", `${zh ? "\u8681" : "Ant"} ${ants2.length} \xB7 ${zh ? "\u5375" : "Egg"} ${eggs2.length}`));
-      if (hasQueen)
-        cell.append(el("span", "tn-queen-badge", text.queen));
+      if (hasQueen) cell.append(el("span", "tn-queen-badge", text.queen));
       if (index === cellIndex) {
         detail.replaceChildren(el("h3", "", `${roomName(x, y)} (${x},${y})`));
-        if (!ants2.length && !eggs2.length)
-          detail.append(el("p", "", text.empty));
-        if (x === 3 && y === 0)
-          detail.append(el("p", "", `${text.food}: ${nest.food}`));
-        for (const ant of ants2)
-          detail.append(el("p", "", `${ant.id} \xB7 ${ant.role === "queen" ? text.queen : text.worker}${ant.energy === void 0 ? "" : ` \xB7 ${zh ? "\u4F53\u529B" : "Energy"} ${ant.energy.toFixed(0)}`}${ant.hunger === void 0 ? "" : ` \xB7 ${zh ? "\u9965\u997F" : "Hunger"} ${ant.hunger.toFixed(0)}/100`}`));
+        if (!ants2.length && !eggs2.length) detail.append(el("p", "", text.empty));
+        if (x === 3 && y === 0) detail.append(el("p", "", `${text.food}: ${nest.food}`));
+        for (const ant of ants2) detail.append(el("p", "", `${ant.id} \xB7 ${ant.role === "queen" ? text.queen : text.worker}${ant.energy === void 0 ? "" : ` \xB7 ${zh ? "\u4F53\u529B" : "Energy"} ${ant.energy.toFixed(0)}`}${ant.hunger === void 0 ? "" : ` \xB7 ${zh ? "\u9965\u997F" : "Hunger"} ${ant.hunger.toFixed(0)}/100`}`));
         for (const egg of eggs2) {
           const row = el("p", "", `${egg.id} \xB7 ${remainingTime(egg.hatchesAtMs)} \xB7 `);
           const time = el("time", "tn-time", new Date(egg.hatchesAtMs).toLocaleString(zh ? "zh-CN" : "en"));
@@ -1040,30 +1078,23 @@ function createNestViewer(canvas, language = "zh") {
     }
   };
   const restoreView = () => {
-    if (dialog.open || !returnView)
-      return;
+    if (dialog.open || !returnView) return;
     const saved = returnView;
     returnView = null;
-    if (saved.opener.isConnected)
-      saved.opener.focus({ preventScroll: true });
-    for (const { node: node2, x, y } of saved.ancestors)
-      if (node2.isConnected)
-        node2.scrollTo({ left: x, top: y, behavior: "instant" });
+    if (saved.opener.isConnected) saved.opener.focus({ preventScroll: true });
+    for (const { node: node2, x, y } of saved.ancestors) if (node2.isConnected) node2.scrollTo({ left: x, top: y, behavior: "instant" });
     doc.defaultView.scrollTo({ left: saved.x, top: saved.y, behavior: "instant" });
   };
   const open = (nest, opener) => {
     selectedId = nest.id;
-    render();
-    if (dialog.open)
-      return;
+    render2();
+    if (dialog.open) return;
     const ancestors = [];
-    for (let node2 = canvas.parentElement; node2; node2 = node2.parentElement)
-      ancestors.push({ node: node2, x: node2.scrollLeft, y: node2.scrollTop });
+    for (let node2 = canvas.parentElement; node2; node2 = node2.parentElement) ancestors.push({ node: node2, x: node2.scrollLeft, y: node2.scrollTop });
     returnView = { opener, x: doc.defaultView.scrollX, y: doc.defaultView.scrollY, ancestors };
     opener.focus({ preventScroll: true });
     dialog.showModal();
-    if (!matchMedia("(prefers-reduced-motion: reduce)").matches)
-      dialog.animate([{ opacity: 0, transform: "translateY(16px) scale(.98)" }, { opacity: 1, transform: "none" }], { duration: 240, easing: "ease-out" });
+    if (!matchMedia("(prefers-reduced-motion: reduce)").matches) dialog.animate([{ opacity: 0, transform: "translateY(16px) scale(.98)" }, { opacity: 1, transform: "none" }], { duration: 240, easing: "ease-out" });
   };
   const hit = (event) => {
     const bounds = canvas.getBoundingClientRect();
@@ -1075,16 +1106,14 @@ function createNestViewer(canvas, language = "zh") {
     }))).filter(({ dx, dy }) => Math.abs(dx) <= rx && Math.abs(dy) <= ry);
     targets.sort((a, b) => a.dx ** 2 + a.dy ** 2 - b.dx ** 2 - b.dy ** 2);
     const nest = targets[0]?.nest;
-    if (nest)
-      open(nest, triggers.get(nest.id) ?? canvas);
+    if (nest) open(nest, triggers.get(nest.id) ?? canvas);
   };
   dialog.addEventListener("close", restoreView);
   close.addEventListener("click", () => dialog.close());
   dialog.addEventListener("click", (event) => {
     if (event.target === dialog) {
       const r = dialog.getBoundingClientRect();
-      if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom)
-        dialog.close();
+      if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) dialog.close();
     }
   });
   canvas.addEventListener("click", hit);
@@ -1094,8 +1123,7 @@ function createNestViewer(canvas, language = "zh") {
       state = next;
       recordedAtMs = atMs;
       const nests = next.nests ?? [];
-      if (canvas.parentElement && toolbar.parentElement !== canvas.parentElement)
-        canvas.after(toolbar);
+      if (canvas.parentElement && toolbar.parentElement !== canvas.parentElement) canvas.after(toolbar);
       const ids = nests.map((nest) => nest.id).join(",");
       if (ids !== nestIds) {
         nestIds = ids;
@@ -1106,22 +1134,19 @@ function createNestViewer(canvas, language = "zh") {
           triggers.set(nest.id, button);
           button.addEventListener("click", () => {
             const current = state?.nests?.find((current2) => current2.id === nest.id);
-            if (current)
-              open(current, button);
+            if (current) open(current, button);
           });
           return button;
         }));
       }
       toolbar.hidden = !nests.length;
       canvas.style.cursor = nests.length ? "pointer" : "";
-      if (dialog.open)
-        render();
+      if (dialog.open) render2();
     },
     dispose() {
       canvas.removeEventListener("click", hit);
       canvas.style.cursor = "";
-      if (dialog.open)
-        dialog.close();
+      if (dialog.open) dialog.close();
       restoreView();
       dialog.removeEventListener("close", restoreView);
       toolbar.remove();
@@ -1130,7 +1155,7 @@ function createNestViewer(canvas, language = "zh") {
   };
 }
 
-// ../../scratch/full-garden/renderer-consumer/package/dist/nest-scene.js
+// packages/terrarium-renderer/src/nest-scene.ts
 function drawAntNest(g, x, y, night) {
   g.save();
   g.fillStyle = "rgba(35,25,18,.2)";
@@ -1166,7 +1191,7 @@ function drawAntNest(g, x, y, night) {
   g.restore();
 }
 
-// ../../scratch/full-garden/renderer-consumer/package/dist/scene.js
+// packages/terrarium-renderer/src/scene.ts
 function bugPositions(bugs, positions = /* @__PURE__ */ new Map(), size = 5) {
   const groups = /* @__PURE__ */ new Map();
   for (const bug of bugs) {
@@ -1175,8 +1200,7 @@ function bugPositions(bugs, positions = /* @__PURE__ */ new Map(), size = 5) {
     group.push(bug.id);
     groups.set(tile, group);
   }
-  for (const group of groups.values())
-    group.sort();
+  for (const group of groups.values()) group.sort();
   const result = /* @__PURE__ */ new Map();
   for (const bug of bugs) {
     const position = positions.get(bug.id) ?? bug;
@@ -1194,8 +1218,7 @@ function bugPositions(bugs, positions = /* @__PURE__ */ new Map(), size = 5) {
 }
 function drawScene(canvas, state, positions = /* @__PURE__ */ new Map(), hits = []) {
   const g = canvas.getContext("2d");
-  if (!g)
-    return;
+  if (!g) return;
   const size = sceneSize(state);
   const scale = residentScale(size);
   const plot = (x, y) => plotPosition(x, y, size);
@@ -1234,29 +1257,27 @@ function drawScene(canvas, state, positions = /* @__PURE__ */ new Map(), hits = 
   g.roundRect(76, 194, 648, 236, 12);
   g.fill();
   const cellWidth = LAND_SURFACE.width / size, cellHeight = LAND_SURFACE.height / size;
-  for (let y = 0; y < size; y++)
-    for (let x = 0; x < size; x++) {
-      const center = plot(x, y);
-      const cell = state.soil?.find((cell2) => cell2.x === x && cell2.y === y);
-      const left = center.x - cellWidth / 2, top = center.y - cellHeight / 2;
-      g.fillStyle = `rgba(36,91,107,${(cell?.moisture ?? 0) / 230})`;
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const center = plot(x, y);
+    const cell = state.soil?.find((cell2) => cell2.x === x && cell2.y === y);
+    const left = center.x - cellWidth / 2, top = center.y - cellHeight / 2;
+    g.fillStyle = `rgba(36,91,107,${(cell?.moisture ?? 0) / 230})`;
+    g.fillRect(left + 1, top + 1, cellWidth - 2, cellHeight - 2);
+    if ((cell?.daylight ?? 1) < 0.4) {
+      g.fillStyle = "rgba(20,30,40,.18)";
       g.fillRect(left + 1, top + 1, cellWidth - 2, cellHeight - 2);
-      if ((cell?.daylight ?? 1) < 0.4) {
-        g.fillStyle = "rgba(20,30,40,.18)";
-        g.fillRect(left + 1, top + 1, cellWidth - 2, cellHeight - 2);
-      }
-      g.strokeStyle = night ? "#dce9c51c" : "#f9efd42e";
-      g.lineWidth = 1;
-      g.beginPath();
-      g.rect(left, top, cellWidth, cellHeight);
-      g.stroke();
     }
+    g.strokeStyle = night ? "#dce9c51c" : "#f9efd42e";
+    g.lineWidth = 1;
+    g.beginPath();
+    g.rect(left, top, cellWidth, cellHeight);
+    g.stroke();
+  }
   drawGardenGround(g, state, size, night);
-  for (const colony of state.nests ?? [])
-    for (const nest of [colony, ...colony.entrances ?? []]) {
-      const { x, y } = plot(nest.x, nest.y);
-      drawAntNest(g, x, y, night);
-    }
+  for (const colony of state.nests ?? []) for (const nest of [colony, ...colony.entrances ?? []]) {
+    const { x, y } = plot(nest.x, nest.y);
+    drawAntNest(g, x, y, night);
+  }
   for (const web of state.webs ?? []) {
     const { x, y } = plot(web.x, web.y);
     g.save();
@@ -1275,10 +1296,8 @@ function drawScene(canvas, state, positions = /* @__PURE__ */ new Map(), hits = 
       for (let i = 0; i <= 8; i++) {
         const angle = i * Math.PI / 4;
         const px = Math.cos(angle) * radius, py = Math.sin(angle) * radius;
-        if (!i)
-          g.moveTo(px, py);
-        else
-          g.lineTo(px, py);
+        if (!i) g.moveTo(px, py);
+        else g.lineTo(px, py);
       }
       g.stroke();
     }
@@ -1333,8 +1352,7 @@ function drawScene(canvas, state, positions = /* @__PURE__ */ new Map(), hits = 
       g.translate(-x, -base);
     }
     if (drawNeighborPlant(g, plant, x, base, night)) {
-      if (["clover", "basil", "bean", "tomato", "strawberry"].includes(plant.species))
-        drawPlantFlowers(g, plant, x, base - 16 - plant.stage * 17, night);
+      if (["clover", "basil", "bean", "tomato", "strawberry"].includes(plant.species)) drawPlantFlowers(g, plant, x, base - 16 - plant.stage * 17, night);
       g.restore();
       continue;
     }
@@ -1353,8 +1371,7 @@ function drawScene(canvas, state, positions = /* @__PURE__ */ new Map(), hits = 
       drawLeaf(g, appearance, x + side * (9 + plant.stage * 3), y - 7 + appearance.wilt * 6, 11 + plant.stage * 3, plant.species === "fern" ? 7 : 11, -side * (0.45 - appearance.wilt * 0.8), i);
     }
     if (plant.species === "clover" && plant.stage > 1) {
-      for (const [i, dx] of [-8, 0, 8].entries())
-        drawLeaf(g, appearance, x + dx, base - height, 9, 9, 0, i);
+      for (const [i, dx] of [-8, 0, 8].entries()) drawLeaf(g, appearance, x + dx, base - height, 9, 9, 0, i);
     }
     drawPlantFlowers(g, plant, x, base - height, night);
     g.restore();
@@ -1518,13 +1535,12 @@ function drawScene(canvas, state, positions = /* @__PURE__ */ new Map(), hits = 
     } else if (bug.species === "spider") {
       g.strokeStyle = "#282a36";
       g.lineWidth = 2.4;
-      for (const side of [-1, 1])
-        for (let i = -1; i <= 1; i++) {
-          g.beginPath();
-          g.moveTo(x + side * 5, y + i * 3);
-          g.lineTo(x + side * 16, y + i * 8);
-          g.stroke();
-        }
+      for (const side of [-1, 1]) for (let i = -1; i <= 1; i++) {
+        g.beginPath();
+        g.moveTo(x + side * 5, y + i * 3);
+        g.lineTo(x + side * 16, y + i * 8);
+        g.stroke();
+      }
       g.fillStyle = "#393848";
       g.beginPath();
       g.arc(x, y, 9, 0, Math.PI * 2);
@@ -1538,13 +1554,12 @@ function drawScene(canvas, state, positions = /* @__PURE__ */ new Map(), hits = 
     } else if (bug.species === "ant") {
       g.strokeStyle = "#3b2b24";
       g.lineWidth = 1.8;
-      for (const side of [-1, 1])
-        for (const dx of [-5, 0, 5]) {
-          g.beginPath();
-          g.moveTo(x + dx, y);
-          g.lineTo(x + dx - 2, y + side * 8);
-          g.stroke();
-        }
+      for (const side of [-1, 1]) for (const dx of [-5, 0, 5]) {
+        g.beginPath();
+        g.moveTo(x + dx, y);
+        g.lineTo(x + dx - 2, y + side * 8);
+        g.stroke();
+      }
       g.fillStyle = "#493025";
       for (const [dx, radius] of [[-7, 5], [0, 3], [6, 4]]) {
         g.beginPath();
@@ -1593,13 +1608,12 @@ function drawScene(canvas, state, positions = /* @__PURE__ */ new Map(), hits = 
       g.fill();
       g.strokeStyle = "#608943";
       g.lineWidth = 1.4;
-      for (const side of [-1, 1])
-        for (const dx of [-4, 1, 5]) {
-          g.beginPath();
-          g.moveTo(x + dx, y + side * 4);
-          g.lineTo(x + dx + 3, y + side * 10);
-          g.stroke();
-        }
+      for (const side of [-1, 1]) for (const dx of [-4, 1, 5]) {
+        g.beginPath();
+        g.moveTo(x + dx, y + side * 4);
+        g.lineTo(x + dx + 3, y + side * 10);
+        g.stroke();
+      }
       g.fillStyle = "#24352b";
       g.beginPath();
       g.arc(x + 5, y - 2, 1.5, 0, Math.PI * 2);
@@ -1644,7 +1658,6 @@ function createLandRenderer(canvas) {
   let movedAt = 0;
   let hitAt = 0;
   let hits = [];
-  let frame = 0;
   let disposed = false;
   const currentPositions = (now) => {
     return new Map((state?.bugs ?? []).map((bug) => {
@@ -1653,16 +1666,17 @@ function createLandRenderer(canvas) {
       return [bug.id, { x: old.x + (bug.x - old.x) * t, y: old.y + (bug.y - old.y) * t }];
     }));
   };
-  const render = (now) => {
-    if (disposed || !state)
-      return;
+  const render2 = (now) => {
+    if (disposed || !state) return;
     drawScene(canvas, state, currentPositions(now), hits.map((hit) => ({ ...hit, strength: Math.max(0, 1 - (now - hitAt) / 900) })));
-    frame = requestAnimationFrame(render);
   };
+  const animation = createSceneAnimation(canvas, render2);
   return {
+    setActive(active) {
+      animation.setActive(active);
+    },
     setState(next) {
-      if (disposed)
-        return;
+      if (disposed) return;
       const now = performance.now();
       const removed = state ? state.bugs.filter((bug) => !next.bugs.some((current) => current.id === bug.id) && next.bugs.some((hunter) => hunter.x === bug.x && hunter.y === bug.y && (hunter.species === "spider" ? bug.species !== "spider" : ["beetle", "ladybug"].includes(hunter.species) && bug.species === "aphid"))).map((bug) => ({ x: bug.x, y: bug.y })) : [];
       if (removed.length) {
@@ -1679,12 +1693,11 @@ function createLandRenderer(canvas) {
         movedAt = now;
       }
       state = next;
-      if (!frame)
-        frame = requestAnimationFrame(render);
+      animation.request();
     },
     dispose() {
       disposed = true;
-      cancelAnimationFrame(frame);
+      animation.dispose();
     }
   };
 }
@@ -1693,6 +1706,9 @@ function createScene(canvas, language = "zh") {
   const viewer = createNestViewer(canvas, language);
   const tooltip = createPlantTooltip(canvas, language);
   return {
+    setActive(active) {
+      renderer.setActive(active);
+    },
     setState(state, recordedAtMs) {
       renderer.setState(state);
       viewer.setState(state, recordedAtMs);
@@ -1706,7 +1722,7 @@ function createScene(canvas, language = "zh") {
   };
 }
 
-// ../../scratch/full-garden/renderer-consumer/package/dist/water-residents.js
+// packages/terrarium-renderer/src/water-residents.ts
 function drawWaterPlant(g, plant, now, night) {
   const appearance = plantAppearance(plant, night), height = 22 + plant.stage * 9;
   const sway = Math.sin(now / 1600) * 2;
@@ -1784,16 +1800,15 @@ function drawWaterPlant(g, plant, now, night) {
     if (plant.flower) {
       g.save();
       g.translate(sway, -height + 18);
-      if (plant.flower === "bloom")
-        for (let i = 0; i < 8; i++) {
-          g.save();
-          g.rotate(i * Math.PI / 4);
-          g.fillStyle = i % 2 ? "#f4d5e4" : "#d991b8";
-          g.beginPath();
-          g.ellipse(0, -6, 3.8, 9, 0, 0, Math.PI * 2);
-          g.fill();
-          g.restore();
-        }
+      if (plant.flower === "bloom") for (let i = 0; i < 8; i++) {
+        g.save();
+        g.rotate(i * Math.PI / 4);
+        g.fillStyle = i % 2 ? "#f4d5e4" : "#d991b8";
+        g.beginPath();
+        g.ellipse(0, -6, 3.8, 9, 0, 0, Math.PI * 2);
+        g.fill();
+        g.restore();
+      }
       else {
         g.fillStyle = "#d99dbb";
         g.beginPath();
@@ -1816,8 +1831,7 @@ function drawWaterPlant(g, plant, now, night) {
     g.moveTo(x, 22);
     g.quadraticCurveTo(x + strand * 7 + sway, 0, x + sway, top);
     g.stroke();
-    if (plant.species === "algae")
-      continue;
+    if (plant.species === "algae") continue;
     for (let y = 14; y > top + 3; y -= 9) {
       g.strokeStyle = appearance.leaf;
       g.fillStyle = appearance.youngLeaf;
@@ -1834,12 +1848,11 @@ function drawWaterPlant(g, plant, now, night) {
           g.lineTo(x + dx * 0.85 + sway - 2, y - 9);
           g.stroke();
         }
-      } else
-        for (const side of [-1, 1]) {
-          g.beginPath();
-          g.ellipse(x + side * 5 + sway / 2, y - 2, 7, 3, side * -0.6, 0, Math.PI * 2);
-          g.fill();
-        }
+      } else for (const side of [-1, 1]) {
+        g.beginPath();
+        g.ellipse(x + side * 5 + sway / 2, y - 2, 7, 3, side * -0.6, 0, Math.PI * 2);
+        g.fill();
+      }
     }
   }
 }
@@ -1954,12 +1967,11 @@ function drawWaterFish(g, species, now, night) {
   g.fill();
 }
 
-// ../../scratch/full-garden/renderer-consumer/package/dist/water-scene.js
+// packages/terrarium-renderer/src/water-scene.ts
 function createWaterScene(canvas) {
   let state;
   let old = /* @__PURE__ */ new Map();
   let movedAt = 0;
-  let request = 0;
   let disposed = false;
   const position = (x, y) => cellPosition(WATER_SURFACE, x, y, sceneSize(state ?? {}));
   const locations = (now) => new Map((state?.fish ?? []).map((fish) => {
@@ -1967,9 +1979,8 @@ function createWaterScene(canvas) {
     const t = Math.min(1, (now - movedAt) / 900);
     return [fish.id, { x: previous.x + (fish.x - previous.x) * t, y: previous.y + (fish.y - previous.y) * t }];
   }));
-  const render = (now) => {
-    if (disposed || !state)
-      return;
+  const render2 = (now) => {
+    if (disposed || !state) return;
     const g = canvas.getContext("2d");
     if (g) {
       const night = state.phase === "night";
@@ -1993,11 +2004,10 @@ function createWaterScene(canvas) {
       g.fillText(`O\u2082 ${state.oxygen.toFixed(1)} \xB7 ${state.cleanliness.toFixed(1)} / 100`, 72, 42);
       g.lineWidth = 1;
       g.strokeStyle = "#ffffff25";
-      for (let x = 0; x < sceneSize(state); x++)
-        for (let y = 0; y < sceneSize(state); y++) {
-          const p = position(x, y);
-          g.strokeRect(p.x - WATER_SURFACE.width / size / 2, p.y - WATER_SURFACE.height / size / 2, WATER_SURFACE.width / size, WATER_SURFACE.height / size);
-        }
+      for (let x = 0; x < sceneSize(state); x++) for (let y = 0; y < sceneSize(state); y++) {
+        const p = position(x, y);
+        g.strokeRect(p.x - WATER_SURFACE.width / size / 2, p.y - WATER_SURFACE.height / size / 2, WATER_SURFACE.width / size, WATER_SURFACE.height / size);
+      }
       for (const plant of state.plants) {
         const p = position(plant.x, plant.y);
         g.save();
@@ -2029,15 +2039,14 @@ function createWaterScene(canvas) {
           g.beginPath();
           g.ellipse(p.x, p.y + 12, 15, 7, 0, 0, Math.PI * 2);
           g.fill();
-          if (facility.enabled)
-            for (let i = 0; i < 5; i++) {
-              const rise = (now / 35 + i * 18) % 90;
-              g.strokeStyle = "#d4f8ff99";
-              g.lineWidth = 1.5;
-              g.beginPath();
-              g.arc(p.x + Math.sin(i + now / 1200) * 9, p.y - rise, 2 + i % 3, 0, Math.PI * 2);
-              g.stroke();
-            }
+          if (facility.enabled) for (let i = 0; i < 5; i++) {
+            const rise = (now / 35 + i * 18) % 90;
+            g.strokeStyle = "#d4f8ff99";
+            g.lineWidth = 1.5;
+            g.beginPath();
+            g.arc(p.x + Math.sin(i + now / 1200) * 9, p.y - rise, 2 + i % 3, 0, Math.PI * 2);
+            g.stroke();
+          }
         } else if (facility.kind === "filter") {
           g.fillStyle = "#547e82";
           g.beginPath();
@@ -2099,18 +2108,19 @@ function createWaterScene(canvas) {
         g.scale(scale, scale);
         g.translate(-p.x, -p.y);
         g.translate(p.x, p.y);
-        if (fish.juvenile)
-          g.scale(0.55, 0.55);
+        if (fish.juvenile) g.scale(0.55, 0.55);
         drawWaterFish(g, fish.species, now, night);
         g.restore();
       }
     }
-    request = requestAnimationFrame(render);
   };
+  const animation = createSceneAnimation(canvas, render2);
   return {
+    setActive(active) {
+      animation.setActive(active);
+    },
     setState(next) {
-      if (disposed)
-        return;
+      if (disposed) return;
       const now = performance.now();
       const current = locations(now);
       if (next.fish.some((fish) => {
@@ -2121,17 +2131,16 @@ function createWaterScene(canvas) {
         movedAt = now;
       }
       state = next;
-      if (!request)
-        request = requestAnimationFrame(render);
+      animation.request();
     },
     dispose() {
       disposed = true;
-      cancelAnimationFrame(request);
+      animation.dispose();
     }
   };
 }
 
-// webui/playback.ts
+// packages/cortico-world-terrarium/webui/playback.ts
 function createPlaybackControls(container, createRenderer, language = "zh") {
   const copy = language === "zh" ? { title: "\u6355\u98DF\u56DE\u653E", empty: "\u6682\u65E0\u6355\u98DF\u8BB0\u5F55", play: "\u64AD\u653E", pause: "\u6682\u505C", frames: ["\u79FB\u52A8\u524D", "\u63A5\u89E6\u730E\u7269", "\u6355\u98DF\u540E"], select: "\u9009\u62E9\u6355\u98DF\u8BB0\u5F55", frame: "\u56DE\u653E\u5E27" } : { title: "Hunt replays", empty: "No recorded hunts", play: "Play", pause: "Pause", frames: ["Before movement", "Contact", "After capture"], select: "Choose a hunt", frame: "Replay frame" };
   const details = document.createElement("details");
@@ -2168,7 +2177,7 @@ function createPlaybackControls(container, createRenderer, language = "zh") {
     timer = void 0;
     play.textContent = copy.play;
   };
-  const render = () => {
+  const render2 = () => {
     const replay = replays.find((replay2) => replay2.id === select.value);
     canvas.hidden = !replay;
     select.disabled = play.disabled = slider.disabled = !replay;
@@ -2184,7 +2193,7 @@ function createPlaybackControls(container, createRenderer, language = "zh") {
   const advance = () => {
     if (disposed) return;
     slider.value = String(Number(slider.value) + 1);
-    render();
+    render2();
     if (Number(slider.value) < 2) timer = setTimeout(advance, 1500);
     else stop();
   };
@@ -2194,20 +2203,20 @@ function createPlaybackControls(container, createRenderer, language = "zh") {
       return;
     }
     slider.value = "0";
-    render();
+    render2();
     play.textContent = copy.pause;
     timer = setTimeout(advance, 1500);
   });
   slider.addEventListener("input", () => {
     stop();
-    render();
+    render2();
   });
   select.addEventListener("change", () => {
     stop();
     slider.value = "0";
-    render();
+    render2();
   });
-  render();
+  render2();
   return {
     setReplays(next) {
       if (disposed) return;
@@ -2224,7 +2233,7 @@ function createPlaybackControls(container, createRenderer, language = "zh") {
       else {
         stop();
         slider.value = "0";
-        render();
+        render2();
       }
     },
     dispose() {
@@ -2236,13 +2245,13 @@ function createPlaybackControls(container, createRenderer, language = "zh") {
   };
 }
 
-// src/aquatic-habitat.ts
+// packages/cortico-world-terrarium/src/aquatic-habitat.ts
 function aquaticFlower(plant) {
   if (plant.species !== "waterlily" || plant.health < 35) return void 0;
   return plant.growthHours >= 18 ? "bloom" : plant.growthHours >= 12 ? "bud" : void 0;
 }
 
-// webui/water-scene.ts
+// packages/cortico-world-terrarium/webui/water-scene.ts
 function createWaterScene2(canvas) {
   const renderer = createWaterScene(canvas);
   return { setState(state) {
@@ -2255,7 +2264,7 @@ function createWaterReplayControls(container, language = "zh") {
   return createPlaybackControls(container, createWaterScene2, language);
 }
 
-// webui/public-controls.ts
+// packages/cortico-world-terrarium/webui/public-controls.ts
 var nextId = 0;
 function node(tag, className, text) {
   const element = document.createElement(tag);
@@ -2426,7 +2435,7 @@ function createPublicReplayControls(container, createRenderer, language = "zh") 
   const select = createPublicSelect(selectHost, copy.select, () => {
     stop();
     index = 0;
-    render();
+    render2();
   });
   const stepButtons = copy.frames.map((text, i) => {
     const button = node("button", "pc-step", text);
@@ -2434,12 +2443,12 @@ function createPublicReplayControls(container, createRenderer, language = "zh") 
     button.addEventListener("click", () => {
       stop();
       index = i;
-      render();
+      render2();
     });
     steps.append(button);
     return button;
   });
-  const render = () => {
+  const render2 = () => {
     const replay = replays.find((replay2) => replay2.id === select.value);
     canvas.hidden = transport.hidden = steps.hidden = !replay;
     select.setDisabled(!replay);
@@ -2471,12 +2480,12 @@ function createPublicReplayControls(container, createRenderer, language = "zh") 
     panel.dataset.open = String(expanded);
     panel.inert = !expanded;
     if (!expanded) stop();
-    render();
+    render2();
   });
   const advance = () => {
     if (disposed) return;
     index++;
-    render();
+    render2();
     if (index < 2) timer = setTimeout(advance, 1500);
     else stop();
   };
@@ -2486,7 +2495,7 @@ function createPublicReplayControls(container, createRenderer, language = "zh") 
       return;
     }
     index = 0;
-    render();
+    render2();
     play.setAttribute("aria-label", copy.pause);
     play.setAttribute("aria-pressed", "true");
     timer = setTimeout(advance, 1500);
@@ -2496,7 +2505,7 @@ function createPublicReplayControls(container, createRenderer, language = "zh") 
     const rect = slider.getBoundingClientRect();
     stop();
     index = Math.max(0, Math.min(2, Math.round((clientX - rect.left - 8) / (rect.width - 16) * 2)));
-    render();
+    render2();
   };
   slider.addEventListener("pointerdown", (event) => {
     if (event.button !== 0 || !replays.length) return;
@@ -2520,9 +2529,9 @@ function createPublicReplayControls(container, createRenderer, language = "zh") 
     event.preventDefault();
     stop();
     index = event.key === "Home" ? 0 : event.key === "End" ? 2 : Math.max(0, Math.min(2, index + (["ArrowRight", "ArrowUp"].includes(event.key) ? 1 : -1)));
-    render();
+    render2();
   });
-  render();
+  render2();
   return {
     setReplays(next) {
       if (disposed) return;
@@ -2533,12 +2542,12 @@ function createPublicReplayControls(container, createRenderer, language = "zh") 
         stop();
         index = 0;
       }
-      render();
+      render2();
     },
     setActive(value) {
       active = value;
       if (!active) stop();
-      render();
+      render2();
     },
     dispose() {
       disposed = true;
@@ -2550,7 +2559,7 @@ function createPublicReplayControls(container, createRenderer, language = "zh") 
   };
 }
 
-// webui/scene.ts
+// packages/cortico-world-terrarium/webui/scene.ts
 function landScene(state) {
   return { decorations: state.decorations, litter: state.litter, economy: state.economy ? { pots: state.economy.pots } : void 0, phase: state.phase, gridSize: capacity(state).size, facilities: state.facilities, eggs: state.eggs, nests: state.nests?.map((n) => ({ ...n, foodCapacity: n.depth * 20 })), food: state.food, webs: state.webs, seeds: state.seeds, items: state.items, soil: state.soil?.map((cell) => ({ ...cell, daylight: daylight(state, cell.x, cell.y) })), plants: state.plants.map((p) => ({ ...p, fruitReady: cropRounds(p) > (p.harvestRounds ?? 0), flower: flowerStage(p), seedHead: hasSeedHead(p) })), bugs: state.bugs.map((b) => ({ ...b, flying: isFlying(b.species) })) };
 }
@@ -2587,5 +2596,7 @@ export {
   createWaterScene2 as createWaterScene,
   drawScene2 as drawScene,
   landScene,
-  plotPosition
+  plotPosition,
+  setSceneActive,
+  setSceneFrameRate
 };
