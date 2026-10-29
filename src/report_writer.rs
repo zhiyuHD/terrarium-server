@@ -5,6 +5,21 @@ use crate::{
 };
 use std::sync::{Arc, mpsc};
 use tokio::sync::oneshot;
+#[cfg(target_os = "linux")]
+unsafe extern "C" {
+    fn malloc_trim(pad: usize) -> i32;
+}
+
+const HEAP_TRIM_EVERY_BATCHES: u32 = 64;
+
+fn trim_heap() {
+    #[cfg(target_os = "linux")]
+    // Report validation allocates transient JSON trees. Returning fully free arenas
+    // prevents sustained report traffic from turning those peaks into RSS growth.
+    unsafe {
+        let _ = malloc_trim(0);
+    }
+}
 #[derive(Clone)]
 pub(crate) struct ReportWriter {
     sender: mpsc::SyncSender<Job>,
@@ -23,6 +38,7 @@ impl ReportWriter {
         std::thread::Builder::new()
             .name("report-writer".into())
             .spawn(move || {
+                let mut batches = 0u32;
                 while let Ok(first) = receiver.recv() {
                     let mut jobs = vec![first];
                     while jobs.len() < crate::ingestion::REPORT_CONCURRENCY {
@@ -50,6 +66,11 @@ impl ReportWriter {
                                     reply.send(Err("Database report transaction failed".into()));
                             }
                         }
+                    }
+                    batches = batches.wrapping_add(1);
+                    if batches == HEAP_TRIM_EVERY_BATCHES {
+                        trim_heap();
+                        batches = 0;
                     }
                 }
             })
