@@ -13,7 +13,7 @@ pub fn curved_score(base: f64) -> f64 {
     .round()
 }
 
-fn curve_parts(parts: Value, keys: &[&str]) -> Value {
+pub(crate) fn curve_parts(parts: Value, keys: &[&str]) -> Value {
     let base: f64 = keys.iter().map(|key| parts[key].as_f64().unwrap()).sum();
     if base <= 200.0 {
         return parts;

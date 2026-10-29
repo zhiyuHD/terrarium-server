@@ -1,5 +1,5 @@
 //! Derived ranking rows exclude histories and are rebuilt after older binaries write snapshots.
-use crate::scoring::{SCORE_VERSION, score_parts};
+use crate::scoring::{SCORE_VERSION, curve_parts, score_parts};
 use anyhow::Result;
 use rusqlite::{Connection, params};
 use serde_json::Value;
@@ -14,8 +14,40 @@ pub(crate) fn initialize(conn: &mut Connection) -> Result<()> {
     let version = tx.query_row("SELECT MAX(version) FROM box_score_rules", [], |row| {
         row.get::<_, Option<i64>>(0)
     })?;
-    if version != Some(SCORE_VERSION) {
+    if version.is_none() || version == Some(2) {
+        let cached = {
+            let mut query = tx.prepare("SELECT json_array(s.id,s.kind,s.revision,s.reported_at,s.name,s.parts,s.earned,s.spent,s.id_sort,s.metadata) FROM box_summaries s JOIN boxes b ON b.id=s.id WHERE s.revision IS b.revision AND s.reported_at=b.reported_at")?;
+            query
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for row in cached {
+            let mut fields: Vec<Value> = serde_json::from_str(&row)?;
+            let parts = curve_parts(
+                serde_json::from_str(fields[5].as_str().unwrap())?,
+                if fields[1] == "water" {
+                    &["plants", "fish", "water"]
+                } else {
+                    &["plants", "bugs", "seeds"]
+                },
+            );
+            let score = parts
+                .as_object()
+                .unwrap()
+                .values()
+                .map(|v| v.as_f64().unwrap())
+                .sum::<f64>() as i64;
+            tx.execute(
+                "UPDATE boxes SET score=?2 WHERE id=?1 AND score!=?2",
+                params![fields[0].as_str().unwrap(), score],
+            )?;
+            fields[5] = Value::String(parts.to_string());
+            tx.execute("INSERT OR REPLACE INTO box_summaries SELECT json_extract(?1,'$[0]'),json_extract(?1,'$[1]'),json_extract(?1,'$[2]'),json_extract(?1,'$[3]'),json_extract(?1,'$[4]'),json_extract(?1,'$[5]'),json_extract(?1,'$[6]'),json_extract(?1,'$[7]'),json_extract(?1,'$[8]'),json_extract(?1,'$[9]')", [serde_json::to_string(&fields)?])?;
+        }
+    } else if version != Some(SCORE_VERSION) {
         tx.execute("DELETE FROM box_summaries", [])?;
+    }
+    if version != Some(SCORE_VERSION) {
         tx.execute(
             "DELETE FROM legacy_documents WHERE name='leaderboard.json'",
             [],

@@ -181,11 +181,14 @@ fn opening_old_scores_rebuilds_all_ranks_without_changing_state_tokens_or_revisi
     let path = dir.path().join("data.sqlite");
     drop(store);
     let conn = Connection::open(&path).unwrap();
+    conn.execute_batch("CREATE TEMP TABLE old_summary AS SELECT * FROM box_summaries WHERE id='box-first'; UPDATE old_summary SET parts='{\"plants\":480,\"bugs\":0,\"seeds\":0}';").unwrap();
     conn.execute(
         "UPDATE boxes SET score=480,entry=json_set(entry,'$.score',480) WHERE id=?1",
         ["box-first"],
     )
     .unwrap();
+    conn.execute("INSERT INTO box_summaries SELECT * FROM old_summary", [])
+        .unwrap();
     conn.execute("UPDATE box_score_rules SET version=?1", params![2])
         .unwrap();
     drop(conn);
