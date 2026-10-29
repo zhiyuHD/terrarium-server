@@ -201,9 +201,21 @@ fn opening_old_scores_rebuilds_all_ranks_without_changing_state_tokens_or_revisi
     let summary = store.summary("land", 100, None).unwrap();
     assert_eq!(summary["entries"].as_array().unwrap().len(), 26);
     assert_eq!(summary["entries"][0]["id"], "box-first");
+    let raw: String = store
+        .reader()
+        .unwrap()
+        .query_row("SELECT entry FROM boxes WHERE id='box-first'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&raw).unwrap()["score"], 480);
     store.check().unwrap();
     let export = dir.path().join("curve-export");
     store.export(&export).unwrap();
+    let exported: Value =
+        serde_json::from_slice(&fs::read(export.join("leaderboard.json")).unwrap()).unwrap();
+    assert_eq!(exported["box-first"]["score"], after["score"]);
+    assert_eq!(exported["box-first"]["state"], before["state"]);
     assert_eq!(
         fs::read(export.join("credentials.json")).unwrap(),
         fs::read(dir.path().join("old/credentials.json")).unwrap()

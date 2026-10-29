@@ -16,6 +16,10 @@ pub(crate) fn initialize(conn: &mut Connection) -> Result<()> {
     })?;
     if version != Some(SCORE_VERSION) {
         tx.execute("DELETE FROM box_summaries", [])?;
+        tx.execute(
+            "DELETE FROM legacy_documents WHERE name='leaderboard.json'",
+            [],
+        )?;
     }
     {
         let mut query = tx.prepare("SELECT b.id,b.kind,b.revision,b.reported_at,b.id_sort,json_extract(b.entry,'$.state.name'),json_extract(b.entry,'$.state.economy.earned'),json_extract(b.entry,'$.state.economy.spent'),
@@ -34,7 +38,7 @@ pub(crate) fn initialize(conn: &mut Connection) -> Result<()> {
                 .sum::<f64>() as i64;
             let id: String = row.get(0)?;
             tx.execute(
-                "UPDATE boxes SET score=?2,entry=json_set(entry,'$.score',?2) WHERE id=?1 AND (score!=?2 OR json_extract(entry,'$.score') IS NOT ?2)",
+                "UPDATE boxes SET score=?2 WHERE id=?1 AND score!=?2",
                 params![id, score],
             )?;
             let earned = row.get::<_, Option<i64>>(6).ok().flatten();

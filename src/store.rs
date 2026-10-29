@@ -511,11 +511,19 @@ impl Store {
                 .collect::<rusqlite::Result<_>>()?;
             if !docs.contains_key("leaderboard.json") {
                 let boxes: BTreeMap<String, Value> = tx
-                    .prepare("SELECT id,entry FROM boxes")?
-                    .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+                    .prepare("SELECT id,entry,score FROM boxes")?
+                    .query_map([], |r| {
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            r.get::<_, String>(1)?,
+                            r.get::<_, f64>(2)?,
+                        ))
+                    })?
                     .map(|r| {
-                        let (id, text) = r?;
-                        Ok((id, serde_json::from_str::<Value>(&text)?))
+                        let (id, text, score) = r?;
+                        let mut entry: Value = serde_json::from_str(&text)?;
+                        entry["score"] = Value::from(score);
+                        Ok((id, entry))
                     })
                     .collect::<Result<_>>()?;
                 docs.insert("leaderboard.json".into(), serde_json::to_vec(&boxes)?);
