@@ -334,6 +334,38 @@ impl Store {
             Ok(true)
         })
     }
+    pub fn admin_feedback_pending(&self) -> Result<usize> {
+        let data = feedback(&self.reader()?)?;
+        Ok(data["feedback"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|v| v.get("resolvedAt").is_none_or(Value::is_null))
+            .count())
+    }
+    pub fn admin_feedback_page(
+        &self,
+        page: usize,
+        size: usize,
+        pending_only: bool,
+    ) -> Result<Value> {
+        anyhow::ensure!(
+            page > 0 && (1..=100).contains(&size),
+            OperationError::new(400, "Invalid feedback pagination")
+        );
+        let data = feedback(&self.reader()?)?;
+        let all = data["feedback"].as_array().unwrap();
+        let items: Vec<_> = all
+            .iter()
+            .rev()
+            .filter(|v| !pending_only || v.get("resolvedAt").is_none_or(Value::is_null))
+            .collect();
+        let pages = items.len().div_ceil(size).max(1);
+        let page = page.min(pages);
+        Ok(
+            json!({"feedback":items.iter().skip((page-1)*size).take(size).collect::<Vec<_>>(),"page":page,"pages":pages,"pageSize":size,"total":all.len(),"filtered":items.len()}),
+        )
+    }
     pub fn list_feedback(&self, after: u64) -> Result<Value> {
         let data = feedback(&self.reader()?)?;
         let items: Vec<_> = data["feedback"]

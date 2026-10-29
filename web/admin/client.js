@@ -42,11 +42,32 @@ function iconLabel(element, symbol, text) {
   element.replaceChildren(icon(symbol), node("span", text));
   element.classList.add("with-icon");
 }
-var date = (value) => value ? new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", dateStyle: "short", timeStyle: "medium", hour12: false }).format(new Date(value)) : "\u5C1A\u672A\u4E0A\u62A5";
+var dateFormatter = new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", dateStyle: "short", timeStyle: "medium", hour12: false });
+var date = (value) => value ? dateFormatter.format(new Date(value)) : "\u5C1A\u672A\u4E0A\u62A5";
 var token = sessionStorage.getItem("terrarium-admin-token") ?? "";
 var epoch = 0;
 var refreshing = false;
 var snapshot;
+var activeTab = "boxes", boxPage = 1, feedbackPage = 1, statistics;
+var feedbackMeta, searchTimer;
+var boxIndex = new Map();
+function remember(boxes) { for (const box of boxes) boxIndex.set(box.id, { ...boxIndex.get(box.id), ...box }); }
+function refreshKey() { return JSON.stringify([activeTab,boxPage,filter,input("search").value.trim(),statisticsScope,feedbackPage,pendingOnly]); }
+function boxQuery(view = "page") { return "boxes?" + new URLSearchParams({view,page:String(boxPage),pageSize:"50",q:input("search").value.trim(),version:filter}); }
+function requestPage(page) { boxPage = page; void refresh(); }
+function pager(host, page, pages, change) {
+  host.replaceChildren(button("上一页",()=>change(page-1)),node("span",`第 ${page} / ${pages} 页`),button("下一页",()=>change(page+1)));
+  host.firstChild.disabled = page <= 1; host.lastChild.disabled = page >= pages;
+}
+function renderActive() {
+  if (!snapshot) return;
+  if (activeTab === "boxes") renderBoxes();
+  else if (activeTab === "statistics" && statistics) renderStatistics();
+  else if (activeTab === "feedback") renderFeedback();
+  else if (activeTab === "announcements") { audience(); renderNotices(); }
+  else if (activeTab === "controls" && controls) renderControls();
+}
+
 var feedback = [];
 var notices = [];
 var controls;
@@ -65,6 +86,7 @@ function logout() {
   token = "";
   sessionStorage.removeItem("terrarium-admin-token");
   selected.clear();
+  boxIndex.clear(); statistics = void 0; feedbackMeta = void 0; clearTimeout(searchTimer);
   snapshot = void 0;
   feedback = [];
   notices = [];
@@ -74,7 +96,7 @@ function logout() {
   el("app").hidden = true;
   el("login").hidden = false;
   input("token").value = "";
-  for (const id of ["box-rows", "feedback-list", "notice-list", "stats"]) el(id).replaceChildren();
+  for (const id of ["box-rows", "feedback-list", "notice-list", "stats", "statistics-charts"]) el(id).replaceChildren();
 }
 async function api(path, method = "GET", body) {
   const currentEpoch = epoch;
@@ -88,43 +110,43 @@ async function api(path, method = "GET", body) {
   if (!response.ok) throw new Error(data.error ?? `HTTP ${response.status}`);
   return data;
 }
-async function loadFeedback() {
-  const result = [];
-  let after = 0;
-  for (; ; ) {
-    const page = await api(`feedback?after=${after}`);
-    result.push(...page.feedback);
-    if (!page.feedback.length) return result;
-    after = page.nextCursor;
-  }
-}
 async function refresh() {
   if (!token || refreshing) return;
   refreshing = true;
-  const currentEpoch = epoch;
+  const currentEpoch = epoch, key = refreshKey(), requestedTab = activeTab;
   try {
-    const [next, nextFeedback, nextNotices, nextControls] = await Promise.all([api("boxes"), loadFeedback(), api("announcements"), api("controls")]);
-    if (epoch !== currentEpoch) return;
-    snapshot = next;
-    feedback = nextFeedback;
-    notices = nextNotices.announcements;
-    controls = nextControls;
-    for (const id of selected) if (!next.boxes.some((box) => box.id === id && box.registered)) selected.delete(id);
-    el("login").hidden = true;
-    el("app").hidden = false;
-    status("");
-    render();
-    el("sync-at").textContent = `\u66F4\u65B0\u4E8E ${date(next.serverAt)}`;
-    el("server-info").textContent = `\u8FD0\u884C ${Math.floor(next.uptimeSec / 3600)} \u5C0F\u65F6 \xB7 \u4E3B\u8FDB\u7A0B\u5185\u5B58 ${(next.memoryBytes / 1048576).toFixed(1)} MiB \xB7 \u65F6\u95F4\u5747\u4E3A\u5317\u4EAC\u65F6\u95F4`;
+    const extra = requestedTab === "feedback" ? api("feedback?"+new URLSearchParams({view:"page",page:String(feedbackPage),pageSize:"50",pendingOnly:String(pendingOnly)}))
+      : requestedTab === "statistics" ? api("boxes?view=statistics&scope="+encodeURIComponent(statisticsScope))
+      : requestedTab === "controls" ? api("controls")
+      : requestedTab === "announcements" ? api("announcements") : Promise.resolve(null);
+    const [next, detail] = await Promise.all([api(boxQuery()), extra]);
+    if (epoch !== currentEpoch || key !== refreshKey()) return;
+    snapshot = next; boxPage = next.page; remember(next.boxes); for (const box of next.boxes) if (!box.registered) selected.delete(box.id); serverOffset = Date.parse(next.serverAt) - Date.now();
+    if (requestedTab === "feedback") {
+      feedback = detail.feedback; feedbackMeta = detail; feedbackPage = detail.page;
+      const ids = [...new Set(feedback.map(item=>item.boxId).filter(Boolean))];
+      if (ids.length) {
+        const names = await api("boxes?view=lookup&ids="+encodeURIComponent(JSON.stringify(ids)));
+        if (epoch !== currentEpoch || key !== refreshKey()) return;
+        remember(names.boxes);
+      }
+    } else if (requestedTab === "statistics") statistics = detail.statistics;
+    else if (requestedTab === "controls") controls = detail;
+    else if (requestedTab === "announcements") notices = detail.announcements;
+    el("login").hidden = true; el("app").hidden = false; status(""); render();
+    el("sync-at").textContent = `更新于 ${date(next.serverAt)}`;
+    el("server-info").textContent = `运行 ${Math.floor(next.uptimeSec / 3600)} 小时 · 主进程内存 ${(next.memoryBytes / 1048576).toFixed(1)} MiB · 时间均为北京时间`;
   } catch (error) {
     const message = error.message;
     if (epoch === currentEpoch) status(message);
     if (!token || el("app").hidden) el("login-error").textContent = message;
   } finally {
     refreshing = false;
+    if (token && epoch === currentEpoch && key !== refreshKey()) void refresh();
   }
 }
 function tab(name) {
+  activeTab = name; renderActive(); void refresh();
   for (const section of Array.from(document.querySelectorAll(".panel"))) section.hidden = section.id !== name;
   for (const item of Array.from(document.querySelectorAll("[data-tab]"))) {
     item.classList.toggle("active", item.dataset.tab === name);
@@ -134,27 +156,29 @@ function tab(name) {
 function version(box) {
   return box.clientVersion ?? (box.reportedAt ? "\u22640.7.3\uFF08\u63A8\u5B9A\uFF09" : "\u672A\u4E0A\u62A5");
 }
-function visibleBoxes() {
-  const query = input("search").value.trim().toLowerCase();
-  return (snapshot?.boxes ?? []).filter((box) => (filter === "*" || version(box) === filter) && `${box.name} ${box.id}`.toLowerCase().includes(query)).sort((a, b) => (b.reportedAt ?? "").localeCompare(a.reportedAt ?? ""));
+function visibleBoxes() { return snapshot?.boxes ?? []; }
+function selectionInfo() {
+  if (!snapshot) return;
+  el("selection-info").textContent = `符合筛选 ${snapshot.filtered} / ${snapshot.total} 个 · 本页 ${snapshot.boxes.length} 个 · 已选择 ${selected.size} 个（跨页保留，上限 100）`;
 }
 function audience() {
   input("scope-all").setAttribute("aria-pressed", String(allTargets));
   input("scope-selected").setAttribute("aria-pressed", String(!allTargets));
   el("audience").textContent = allTargets ? "\u5E7F\u64AD \xB7 \u516C\u7F51\u53EF\u89C1" : `\u5B9A\u5411 \xB7 ${selected.size} \u4E2A\u76D2\u5B50`;
-  el("audience-names").textContent = allTargets ? "\u6240\u6709\u73B0\u6709\u53CA\u6709\u6548\u671F\u5185\u65B0\u6CE8\u518C\u7684\u5BA2\u6237\u7AEF\uFF0C\u516C\u7F51\u9875\u9762\u4E5F\u4F1A\u5C55\u793A\u3002" : [...selected].map((id) => `${snapshot?.boxes.find((box) => box.id === id)?.name ?? id} (${id})`).join("\u3001") || "\u8BF7\u5148\u5728\u76D2\u5B50\u6982\u89C8\u4E2D\u9009\u62E9\u63A5\u6536\u8005\u3002";
+  el("audience-names").textContent = allTargets ? "\u6240\u6709\u73B0\u6709\u53CA\u6709\u6548\u671F\u5185\u65B0\u6CE8\u518C\u7684\u5BA2\u6237\u7AEF\uFF0C\u516C\u7F51\u9875\u9762\u4E5F\u4F1A\u5C55\u793A\u3002" : [...selected].map((id) => `${boxIndex.get(id)?.name ?? id} (${id})`).join("\u3001") || "\u8BF7\u5148\u5728\u76D2\u5B50\u6982\u89C8\u4E2D\u9009\u62E9\u63A5\u6536\u8005\u3002";
 }
 function renderBoxes() {
   const rows = el("box-rows");
-  rows.replaceChildren();
+  const fragment = document.createDocumentFragment();
   const visible = visibleBoxes();
   for (const box of visible) {
     const row = node("tr");
     row.classList.toggle("selected", selected.has(box.id));
     const nameCell = node("td"), check = button("", () => {
       if (selected.has(box.id)) selected.delete(box.id);
-      else selected.add(box.id);
-      renderBoxes();
+      else { if (selected.size >= 100) { status("定向公告最多选择 100 个盒子；请缩小范围或使用广播。"); return; } selected.add(box.id); }
+      row.classList.toggle("selected", selected.has(box.id));
+      check.setAttribute("aria-checked", String(selected.has(box.id))); selectionInfo(); audience();
     }, "check", "check");
     check.setAttribute("role", "checkbox");
     check.setAttribute("aria-checked", String(selected.has(box.id)));
@@ -168,74 +192,38 @@ function renderBoxes() {
     iconLabel(live, box.wsConnections ? "wifi" : "wifi-off", box.wsConnections ? `WS \u5728\u7EBF (${box.wsConnections})` : "WS \u672A\u8FDE\u63A5");
     connection.append(live, node("span", `\u6700\u8FD1\u63D0\u4EA4\uFF1A${box.reportTransport === "websocket" ? "WS" : box.reportTransport === "http" ? "HTTP" : "\u672A\u77E5"}`, "small muted"));
     row.append(connection, node("td", date(box.reportedAt)), node("td", box.score === null ? "\u672A\u4E0A\u62A5" : String(box.score)));
-    rows.append(row);
+    fragment.append(row);
   }
   if (!visible.length) {
     const row = node("tr"), cell = node("td", "\u6CA1\u6709\u7B26\u5408\u6761\u4EF6\u7684\u76D2\u5B50", "empty");
     cell.colSpan = 7;
     row.append(cell);
-    rows.append(row);
+    fragment.append(row);
   }
-  el("selection-info").textContent = `\u663E\u793A ${visible.length} / ${snapshot?.boxes.length ?? 0} \u4E2A \xB7 \u5DF2\u9009\u62E9 ${selected.size} \u4E2A\uFF08\u5207\u6362\u7B5B\u9009\u4F1A\u4FDD\u7559\u9009\u62E9\uFF09`;
+  rows.replaceChildren(fragment);
+  for (const id of ["box-pagination-top","box-pagination"]) pager(el(id),snapshot.page,snapshot.pages,requestPage);
+  selectionInfo();
   audience();
 }
 function render() {
   if (!snapshot) return;
   const stats = el("stats");
   stats.replaceChildren();
-  for (const [label, value] of [["\u5DF2\u6CE8\u518C\u76D2\u5B50", snapshot.boxes.length], ["WS \u8FDE\u63A5\u4E2D\u7684\u76D2\u5B50", snapshot.boxes.filter((box) => box.wsConnections > 0).length], ["\u5F85\u5904\u7406\u53CD\u9988", feedback.filter((item) => !item.resolvedAt).length], ["\u6709\u6548\u516C\u544A", notices.filter((item) => Date.parse(item.expiresAt) > Date.now()).length]]) {
+  for (const [label, value] of [["\u5DF2\u6CE8\u518C\u76D2\u5B50", snapshot.counts.registered], ["WS \u8FDE\u63A5\u4E2D\u7684\u76D2\u5B50", snapshot.counts.online], ["\u5F85\u5904\u7406\u53CD\u9988", snapshot.counts.pendingFeedback], ["\u6709\u6548\u516C\u544A", snapshot.counts.activeNotices]]) {
     const card = node("div", "", "stat");
     card.append(node("strong", String(value)), node("span", String(label)));
     stats.append(card);
   }
   const versions = el("versions");
   versions.replaceChildren();
-  for (const value of ["*", ...new Set(snapshot.boxes.map(version))]) {
+  for (const value of ["*", ...snapshot.versions]) {
     const control = button(value === "*" ? "\u5168\u90E8\u7248\u672C" : value, () => {
-      filter = value;
-      render();
+      filter = value; boxPage = 1; void refresh();
     });
     control.setAttribute("aria-pressed", String(filter === value));
     versions.append(control);
   }
-  renderBoxes();
-  renderStatistics();
-  renderFeedback();
-  renderNotices();
-  renderControls();
-}
-function statisticsDistribution(boxes, label) {
-  const counts = new Map();
-  for (const box of boxes) {
-    const key = label(box);
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
-  return [...counts].map(([label, count]) => ({ label, count }))
-    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
-}
-function statisticsData(boxes, scope, now) {
-  const reported = boxes.filter(box => box.reportedAt);
-  const recent = box => {
-    const age = now - Date.parse(box.reportedAt);
-    return age >= 0 && age <= 24 * 60 * 60 * 1000;
-  };
-  const selected = reported.filter(box => scope === "recent" ? recent(box) : scope === "online" ? box.wsConnections > 0 : true);
-  const dimensions = [
-    ["World 版本", box => box.clientVersion || "≤0.7.3（推定）"],
-    ["操作系统", box => box.clientSystem?.name || "未上报"],
-    ["系统版本", box => box.clientSystem ? `${box.clientSystem.name} · ${box.clientSystem.version}` : "未上报"],
-    ["部署识别", box => box.coopanionVersion ? "Coopanion" : "未识别"],
-    ["Coopanion 版本", box => box.coopanionVersion || "未上报"],
-    ["生态箱类型", box => box.kind === "land" ? "地箱" : box.kind === "water" ? "水箱" : "未知"],
-    ["最近提交方式", box => box.reportTransport === "websocket" ? "WebSocket" : box.reportTransport === "http" ? "HTTP" : "未记录"]
-  ];
-  return {
-    total: selected.length,
-    reported: reported.length,
-    unreported: boxes.length - reported.length,
-    recent: reported.filter(recent).length,
-    charts: dimensions.map(([title, label]) => ({ title, rows: statisticsDistribution(selected, label) }))
-  };
+  renderActive();
 }
 function statisticsSlices(rows) {
   if (rows.length <= 8) return rows;
@@ -301,7 +289,7 @@ function statisticsChart({ title, rows }, total) {
   return card;
 }
 function renderStatistics() {
-  const data = statisticsData(snapshot.boxes, statisticsScope, Date.parse(snapshot.serverAt));
+  const data = statistics;
   el("statistics-summary").textContent = `当前统计 ${data.total} 个 · 全部已上报 ${data.reported} 个 · 近 24 小时 ${data.recent} 个 · 从未上报 ${data.unreported} 个（不计入图表）`;
   el("statistics-charts").replaceChildren(...data.charts.map(chart => statisticsChart(chart, data.total)));
 }
@@ -309,16 +297,16 @@ for (const control of document.querySelectorAll("#statistics-scope [data-scope]"
   control.onclick = () => {
     statisticsScope = control.dataset.scope;
     for (const item of document.querySelectorAll("#statistics-scope [data-scope]")) item.setAttribute("aria-pressed", String(item === control));
-    if (snapshot) renderStatistics();
+    statistics = void 0; el("statistics-summary").textContent = "正在读取统计…"; void refresh();
   };
 }
 function renderFeedback() {
   const list = el("feedback-list");
   list.replaceChildren();
-  for (const item of [...feedback].reverse().filter((item2) => !pendingOnly || !item2.resolvedAt)) {
+  for (const item of feedback) {
     const card = node("article", "", "card");
     card.append(node("span", item.resolvedAt ? "\u5DF2\u89E3\u51B3" : "\u5F85\u5904\u7406", "pill"), node("div", `#${item.id} \xB7 ${item.source} \xB7 ${date(item.createdAt)}`, "meta"), node("p", item.text, "wrap"));
-    const box = snapshot?.boxes.find((box2) => box2.id === item.boxId);
+    const box = boxIndex.get(item.boxId);
     card.append(node("p", `\u76D2\u5B50\uFF1A${box?.name ?? item.boxId ?? "\u533F\u540D\u53CD\u9988"}${item.contact ? ` \xB7 \u8054\u7CFB\u65B9\u5F0F\uFF1A${item.contact}` : ""}`, "muted small wrap"));
     const actions = node("div", "", "toolbar");
     if (item.boxId && box?.registered) actions.append(button("\u5B9A\u5411\u56DE\u590D", () => {
@@ -338,7 +326,8 @@ function renderFeedback() {
     card.append(actions);
     list.append(card);
   }
-  if (!list.children.length) list.append(node("div", "\u6682\u65E0\u53CD\u9988", "card empty"));
+  if (!list.children.length) list.append(node("div", "暂无反馈", "card empty"));
+  if (feedbackMeta) for (const id of ["feedback-pagination-top","feedback-pagination"]) pager(el(id),feedbackMeta.page,feedbackMeta.pages,page=>{feedbackPage=page;void refresh()});
 }
 function renderNotices() {
   el("notice-count").textContent = `${notices.length} 条`;
@@ -346,7 +335,7 @@ function renderNotices() {
   list.replaceChildren();
   for (const notice of [...notices].reverse()) {
     const card = node("article", "", "card");
-    card.append(node("h3", `投递 ID #${notice.id} ${notice.title || "\u65E0\u6807\u9898"}`), node("p", notice.text, "wrap"), node("p", notice.targets === "all" ? "\u5E7F\u64AD \xB7 \u516C\u7F51\u53EF\u89C1" : `\u5B9A\u5411\uFF1A${notice.targets.map((id) => snapshot?.boxes.find((box) => box.id === id)?.name ?? id).join("\u3001")}`, "small muted wrap"), node("p", `${date(notice.createdAt)} \u81F3 ${date(notice.expiresAt)}${Date.parse(notice.expiresAt) <= Date.now() ? " \xB7 \u5DF2\u8FC7\u671F" : ""}`, "small muted"));
+    card.append(node("h3", `投递 ID #${notice.id} ${notice.title || "\u65E0\u6807\u9898"}`), node("p", notice.text, "wrap"), node("p", notice.targets === "all" ? "\u5E7F\u64AD \xB7 \u516C\u7F51\u53EF\u89C1" : `\u5B9A\u5411\uFF1A${notice.targets.map((id) => boxIndex.get(id)?.name ?? id).join("\u3001")}`, "small muted wrap"), node("p", `${date(notice.createdAt)} \u81F3 ${date(notice.expiresAt)}${Date.parse(notice.expiresAt) <= Date.now() ? " \xB7 \u5DF2\u8FC7\u671F" : ""}`, "small muted"));
     card.append(button("\u64A4\u56DE", () => confirmAction(`\u64A4\u56DE\u516C\u544A #${notice.id}`, `${notice.title}
 \u5BA2\u6237\u7AEF\u5C06\u4E0D\u518D\u62C9\u53D6\u6B64\u516C\u544A\uFF0C\u5DF2\u8FDB\u5165\u6A21\u578B\u4E0A\u4E0B\u6587\u7684\u4E8B\u4EF6\u4ECD\u7136\u4FDD\u7559\u3002`, async () => {
       await api(`announcements/${notice.id}`, "DELETE");
@@ -447,10 +436,21 @@ el("refresh").onclick = () => {
   void refresh();
 };
 for (const item of Array.from(document.querySelectorAll("[data-tab]"))) item.onclick = () => tab(item.dataset.tab);
-input("search").oninput = renderBoxes;
+input("search").oninput = () => {clearTimeout(searchTimer);boxPage=1;searchTimer=setTimeout(()=>void refresh(),250)};
 el("select-visible").onclick = () => {
-  for (const box of visibleBoxes()) if (box.registered) selected.add(box.id);
+  const ids = visibleBoxes().filter(box=>box.registered).map(box=>box.id);
+  if (new Set([...selected,...ids]).size > 100) { status("定向公告最多选择 100 个盒子。"); return; }
+  for (const id of ids) selected.add(id);
   renderBoxes();
+};
+el("select-filtered").onclick = async () => {
+  const key = refreshKey();
+  try {
+    const result = await api(boxQuery("ids"));
+    if (key !== refreshKey()) return;
+    if (result.tooMany || new Set([...selected,...result.boxes.map(box=>box.id)]).size>100) { status("结果超过定向公告的 100 个上限，请缩小筛选范围或选择广播。"); return; }
+    remember(result.boxes);for(const box of result.boxes)selected.add(box.id);renderBoxes();
+  } catch(error) {status(error.message);}
 };
 el("clear-selected").onclick = () => {
   selected.clear();
@@ -470,9 +470,9 @@ el("scope-all").onclick = () => {
   audience();
 };
 el("feedback-filter").onclick = () => {
-  pendingOnly = !pendingOnly;
+  pendingOnly = !pendingOnly; feedbackPage = 1;
   el("feedback-filter").setAttribute("aria-pressed", String(pendingOnly));
-  renderFeedback();
+  void refresh();
 };
 for (const item of Array.from(document.querySelectorAll("[data-enable]"))) item.onclick = () => {
   scheduleEnabled = item.dataset.enable === "true";
@@ -507,7 +507,7 @@ el("notice-form").onsubmit = (event) => {
     return;
   }
   const body = { title: input("notice-title").value.trim(), text, targets: allTargets ? "all" : [...selected], expiresAt: new Date(Date.now() + serverOffset + hours * 36e5).toISOString() };
-  const recipients = allTargets ? "\u6240\u6709\u5BA2\u6237\u7AEF\uFF08\u5305\u62EC\u65B0\u6CE8\u518C\u5BA2\u6237\u7AEF\uFF09\u53CA\u516C\u7F51\u9875\u9762" : [...selected].map((id) => `${snapshot?.boxes.find((box) => box.id === id)?.name ?? id} (${id})`).join("\n");
+  const recipients = allTargets ? "\u6240\u6709\u5BA2\u6237\u7AEF\uFF08\u5305\u62EC\u65B0\u6CE8\u518C\u5BA2\u6237\u7AEF\uFF09\u53CA\u516C\u7F51\u9875\u9762" : [...selected].map((id) => `${boxIndex.get(id)?.name ?? id} (${id})`).join("\n");
   confirmAction("\u786E\u8BA4\u53D1\u5E03\u516C\u544A", `${body.title}
 
 ${body.text}

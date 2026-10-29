@@ -1,4 +1,4 @@
-<!-- Owner: scripts/build-scene.mjs, src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/report_writer.rs, src/summary_cache.rs, src/support.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, web/forum.html, forum-markdown/client.js, forum-markdown/build.mjs, web/admin/index.html, web/admin/client.js, src/forum.rs, src/forum_recommendation.rs, src/forum_bridge.rs, src/forum_digest.rs, src/presentation.rs, src/story.rs, src/story_text.rs, src/story_seedbed.rs, reading/worker.py, src/photos.rs, src/photo_cache.rs, src/photo_notices.rs, photo/render.mjs, photo/build.mjs -->
+<!-- Owner: src/admin_views.rs, scripts/build-scene.mjs, src/main.rs, src/store.rs, src/http.rs, src/scoring.rs, src/ingestion.rs, src/report_writer.rs, src/summary_cache.rs, src/support.rs, src/push.rs, src/protocol.rs, src/policy.rs, src/legacy_validation.rs, src/admin.rs, src/operations.rs, src/metrics.rs, scripts/check-client.mjs, scripts/check-admin.mjs, src/assets.rs, scripts/pack-release.mjs, scripts/migrate-storage.mjs, web/index.html, web/forum.html, forum-markdown/client.js, forum-markdown/build.mjs, web/admin/index.html, web/admin/client.js, src/forum.rs, src/forum_recommendation.rs, src/forum_bridge.rs, src/forum_digest.rs, src/presentation.rs, src/story.rs, src/story_text.rs, src/story_seedbed.rs, reading/worker.py, src/photos.rs, src/photo_cache.rs, src/photo_notices.rs, photo/render.mjs, photo/build.mjs -->
 # terrarium-server
 
 生态箱独立服务端，生产 HTTP/WS 与存储使用 Rust + SQLite。兼容现有 World 的 HTTP/WS 协议与 TS 存档，可通过 Native 原子发布控制器运行。公共接口仅监听回环地址，管理台使用独立私网端口。
@@ -8,6 +8,8 @@
 计分基础总分 B≤200 时不变，超过后使用 round(200+200×ln(B/200))，不设固定上限。分项按贡献比例分配整数余数，服务端重算旧客户端的提交。启动时按计分版本原子重建所有箱子的得分，包含离线箱子；生物状态、ID、token 与增量校验不变。
 
 观察页画布在滑动、离屏或页面隐藏时暂停，停稳后恢复；手机预览限 12 帧/秒。构建与调度见 [gallery-rendering.md](docs/gallery-rendering.md)。
+
+管理台采用服务端分页、按页加载反馈及全量聚合统计；详情见 [admin-performance.md](docs/admin-performance.md)。
 
 已实现：
 

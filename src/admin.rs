@@ -1,10 +1,5 @@
 use crate::{
-    http::App,
-    ingestion::now_ms,
-    metrics::{Metrics, memory_bytes},
-    operations::OperationError,
-    policy::iso,
-    push::bearer,
+    http::App, ingestion::now_ms, metrics::Metrics, operations::OperationError, push::bearer,
     store::Store,
 };
 use anyhow::{Result, ensure};
@@ -260,24 +255,36 @@ async fn dispatch(
     if method == Method::GET {
         let query = request.uri().query().map(str::to_owned);
         let route = path.clone();
+        let options = if route == "/api/admin/boxes" || route == "/api/admin/feedback" {
+            Some(
+                axum::extract::Query::<crate::admin_views::BoxQuery>::try_from_uri(request.uri())
+                    .map_err(|_| OperationError::new(400, "Invalid admin query"))?
+                    .0,
+            )
+        } else {
+            None
+        };
         let data = operation(store, move |s| match route.as_str() {
             "/api/admin/boxes" => {
-                let mut boxes = s.admin_boxes()?;
-                metrics.annotate(&mut boxes);
-                Ok(json!({
-                    "boxes": boxes,
-                    "serverAt": iso(now_ms()),
-                    "uptimeSec": metrics.uptime(),
-                    "memoryBytes": memory_bytes(),
-                    "acceptedReports": metrics.accepted_reports()
-                }))
+                crate::admin_views::boxes(&s, &metrics, options.as_ref().unwrap(), now_ms())
             }
             "/api/admin/controls" => s.controls(now_ms()),
             "/api/admin/story" => s.story_status(),
             "/api/admin/story/granary" => s.granary_story_status(),
             "/api/admin/story/seedbed" => s.seedbed_story_status(),
             "/api/admin/announcements" => s.list_announcements(),
-            "/api/admin/feedback" => s.list_feedback(cursor(query.as_deref())?),
+            "/api/admin/feedback" => {
+                let opts = options.as_ref().unwrap();
+                if opts.view.as_deref() == Some("page") {
+                    s.admin_feedback_page(
+                        opts.page.unwrap_or(1),
+                        opts.page_size.unwrap_or(50),
+                        opts.pending_only.unwrap_or(false),
+                    )
+                } else {
+                    s.list_feedback(cursor(query.as_deref())?)
+                }
+            }
             _ => Err(OperationError::new(405, "Method not allowed").into()),
         })
         .await?;

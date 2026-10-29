@@ -985,3 +985,206 @@ async fn story_configuration_is_private_authenticated_and_persistent() {
         );
     }
 }
+
+#[tokio::test]
+async fn box_pages_filter_globally_keep_legacy_reads_and_statistics_use_all_reports() {
+    let (_dir, store) = fixture();
+    let now = now_ms();
+    let states: Value = serde_json::from_str(include_str!("fixtures/reports.json")).unwrap();
+    for index in 0..123 {
+        let id = format!("box-page-{index:03}");
+        store.register(Some(&id)).unwrap().unwrap();
+        if index < 120 {
+            let mut state = states["land"].clone();
+            state["name"] = json!(format!("Garden {index:03}"));
+            let mut entry = json!({"id":id,"state":state,"kind":"land","phase":"day","reportedAt":iso(now-index*1000),"clientVersion":"0.9.0","clientSystem":{"name":"Linux","version":"1.0"},"reportTransport":"websocket"});
+            if index % 2 == 0 {
+                entry["clientVersion"] = json!("0.8.8");
+            }
+            if index == 119 {
+                entry.as_object_mut().unwrap().remove("clientVersion");
+            }
+            store.commit_entry(&entry, None).unwrap();
+        }
+    }
+    let token = store.admin_token(false).unwrap();
+    let app = application(store, false);
+    let api = private(app.clone());
+    let (status, old) = request(
+        api.clone(),
+        "GET",
+        "/api/admin/boxes",
+        Value::Null,
+        Some(&token),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(old["boxes"].as_array().unwrap().len(), 123);
+    let (_, one) = request(
+        api.clone(),
+        "GET",
+        "/api/admin/boxes?view=page&pageSize=50",
+        Value::Null,
+        Some(&token),
+    )
+    .await;
+    assert_eq!(one["total"], 123);
+    assert_eq!(one["pages"], 3);
+    assert_eq!(one["boxes"].as_array().unwrap().len(), 50);
+    assert_eq!(one["boxes"][0]["id"], "box-page-000");
+    let (_, last) = request(
+        api.clone(),
+        "GET",
+        "/api/admin/boxes?view=page&page=999&pageSize=50",
+        Value::Null,
+        Some(&token),
+    )
+    .await;
+    assert_eq!(last["page"], 3);
+    assert_eq!(last["boxes"].as_array().unwrap().len(), 23);
+    let (_, filtered) = request(
+        api.clone(),
+        "GET",
+        "/api/admin/boxes?view=page&version=0.8.8&q=garden&pageSize=10&page=2",
+        Value::Null,
+        Some(&token),
+    )
+    .await;
+    assert_eq!(filtered["filtered"], 60);
+    assert_eq!(filtered["pages"], 6);
+    assert_eq!(filtered["boxes"][0]["name"], "Garden 020");
+    let (_, stats) = request(
+        api.clone(),
+        "GET",
+        "/api/admin/boxes?view=statistics&scope=reported",
+        Value::Null,
+        Some(&token),
+    )
+    .await;
+    assert_eq!(stats["statistics"]["total"], 120);
+    assert_eq!(stats["statistics"]["unreported"], 3);
+    for chart in stats["statistics"]["charts"].as_array().unwrap() {
+        assert_eq!(
+            chart["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| r["count"].as_u64().unwrap())
+                .sum::<u64>(),
+            120
+        );
+    }
+    let (_, none) = request(
+        api.clone(),
+        "GET",
+        "/api/admin/boxes?view=page&q=does-not-exist",
+        Value::Null,
+        Some(&token),
+    )
+    .await;
+    assert_eq!(none["pages"], 1);
+    assert_eq!(none["filtered"], 0);
+    let (_, ids) = request(
+        api.clone(),
+        "GET",
+        "/api/admin/boxes?view=ids",
+        Value::Null,
+        Some(&token),
+    )
+    .await;
+    assert_eq!(ids["tooMany"], true);
+    assert!(ids["boxes"].as_array().unwrap().is_empty());
+    let (_, lookup) = request(
+        api.clone(),
+        "GET",
+        "/api/admin/boxes?view=lookup&ids=%5B%22box-page-070%22%5D",
+        Value::Null,
+        Some(&token),
+    )
+    .await;
+    assert_eq!(lookup["boxes"][0]["name"], "Garden 070");
+    assert!(lookup["boxes"][0].get("token").is_none());
+    for query in [
+        "view=page&page=0",
+        "view=page&pageSize=101",
+        "view=statistics&scope=bad",
+        "view=lookup&ids=bad",
+    ] {
+        assert_eq!(
+            request(
+                api.clone(),
+                "GET",
+                &format!("/api/admin/boxes?{query}"),
+                Value::Null,
+                Some(&token)
+            )
+            .await
+            .0,
+            StatusCode::BAD_REQUEST
+        );
+    }
+    assert_eq!(
+        request(
+            api.clone(),
+            "GET",
+            "/api/admin/boxes?view=page",
+            Value::Null,
+            None
+        )
+        .await
+        .0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        request(
+            http::router(app),
+            "GET",
+            "/api/admin/boxes?view=page",
+            Value::Null,
+            Some(&token)
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[test]
+fn feedback_pages_preserve_legacy_cursor_reads_and_filter_before_pagination() {
+    let (_dir, store) = fixture();
+    let now = now_ms();
+    for i in 0..65 {
+        store
+            .submit_feedback(
+                &json!({"text":format!("Synthetic feedback {i}"),"source":"web"}),
+                None,
+                now + i * 61_000,
+            )
+            .unwrap();
+    }
+    for id in [1, 2, 3] {
+        store.resolve_feedback(id, now + 5_000_000).unwrap();
+    }
+    assert_eq!(store.admin_feedback_pending().unwrap(), 62);
+    let page = store.admin_feedback_page(2, 50, false).unwrap();
+    assert_eq!(page["feedback"].as_array().unwrap().len(), 15);
+    assert_eq!(page["feedback"][0]["id"], 15);
+    let pending = store.admin_feedback_page(2, 50, true).unwrap();
+    assert_eq!(pending["filtered"], 62);
+    assert_eq!(pending["feedback"].as_array().unwrap().len(), 12);
+    assert!(
+        pending["feedback"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|v| v.get("resolvedAt").is_none())
+    );
+    assert_eq!(
+        store.list_feedback(60).unwrap()["feedback"]
+            .as_array()
+            .unwrap()
+            .len(),
+        5
+    );
+    assert!(store.admin_feedback_page(0, 50, false).is_err());
+}

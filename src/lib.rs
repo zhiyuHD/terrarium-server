@@ -40,3 +40,5 @@ mod summary_cache;
 mod support;
 
 mod report_writer;
+
+mod admin_views;
