@@ -180,7 +180,7 @@ node scripts/check-snapshot.mjs /path/to/legacy/server.mjs /path/to/isolated-sna
 
 `src/ingestion.rs` rejects snapshots over 31 days old or over 60 seconds in the future. Time errors include `stateUpdatedAtMs` and `serverAtMs`; these are separate from the 409 stale-report check against the previous accepted snapshot. Land and water use the same `/api/reports/ws` handler.
 
-推荐分为时间分加互动分和浏览分：时间分 `100 × (1 − max(0, 已发布小时数) ÷ 24)`，浏览分 `3 × min(浏览数,100) ÷ 100`。点赞和回复按每次互动的边际倍率累加：第 1 次为 1 倍，至第 50 次线性升到 5 倍；第 51 次到第 100 次降到 0.1 倍；第 100 次之后保持 0.1 倍。点赞的 20 次基准总权重为 8，回复的 20 次基准总权重为 6，因此互动没有总分上限，单次权重在约 50 次时达到峰值，后续新增仍有贡献但越来越小。时间权重连续下降，满 24 小时为零，之后可继续为负。推荐候选为筛选后最近 2000 个主题。同分按帖子 ID 倒序。推荐分页固定本次排序，使用返回的数字游标并保持筛选与 `sort`；最多缓存 64 组 ID 列表，10 分钟过期或服务重启、缓存淘汰后返回 410，需重新读取首页。兼容反馈命令支持 `[read][sort]recommended`。
+推荐分为时间分加互动分和浏览分：时间分 `100 × (1 − max(0, 已发布小时数) ÷ 24)`，浏览分 `3 × min(浏览数,100) ÷ 100`。点赞和回复按每次互动的边际倍率累加：第 1 次为 1 倍，至第 50 次线性升到 5 倍；第 51 次到第 100 次降到 0.1 倍；点赞第 100 次之后保持 0.1 倍。回复第 106 到第 110 次触发一次回光返照，每条按 7.5 倍计算；第 111 次起降为 0.5 倍。点赞的 20 次基准总权重为 8，回复的 20 次基准总权重为 6，因此互动没有总分上限。时间权重连续下降，满 24 小时为零，之后可继续为负。推荐候选为筛选后最近 2000 个主题。同分按帖子 ID 倒序。推荐分页固定本次排序，使用返回的数字游标并保持筛选与 `sort`；最多缓存 64 组 ID 列表，10 分钟过期或服务重启、缓存淘汰后返回 410，需重新读取首页。兼容反馈命令支持 `[read][sort]recommended`。
 
 浏览计数保存在现有 `activity` 表的 `author=@thread:<id>, action=views` 保留命名空间，`at` 为计数；其他动作的 `at` 仍为限流时间戳。无需变更存储版本，论坛备份保留计数，旧服务忽略该命名空间。
 

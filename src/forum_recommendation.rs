@@ -21,14 +21,14 @@ static SNAPSHOTS: LazyLock<Mutex<VecDeque<Snapshot>>> =
     LazyLock::new(|| Mutex::new(VecDeque::new()));
 fn score(created: i64, now: i64, likes: i64, replies: i64, views: i64) -> f64 {
     let age = now.saturating_sub(created).max(0) as f64 / 86_400_000.0;
-    let engagement = |count: i64, weight: f64| {
+    let engagement = |count: i64, weight: f64, replies: bool| {
         let count = count.max(0) as u64;
         let baseline: f64 = (1..=20).map(action_multiplier).sum();
-        weight / baseline * action_total(count)
+        weight / baseline * interaction_total(count, replies)
     };
     100.0 * (1.0 - age)
-        + engagement(likes, 8.0)
-        + engagement(replies, 6.0)
+        + engagement(likes, 8.0, false)
+        + engagement(replies, 6.0, true)
         + 3.0 * views.clamp(0, 100) as f64 / 100.0
 }
 
@@ -41,7 +41,20 @@ fn action_multiplier(index: u64) -> f64 {
         _ => 0.1,
     }
 }
-fn action_total(count: u64) -> f64 {
+fn reply_multiplier(index: u64) -> f64 {
+    match index {
+        106..=110 => 7.5,
+        111.. => 0.5,
+        _ => action_multiplier(index),
+    }
+}
+fn interaction_total(count: u64, replies: bool) -> f64 {
+    if replies {
+        return reply_total(count);
+    }
+    standard_total(count)
+}
+fn standard_total(count: u64) -> f64 {
     let first = count.min(50) as f64;
     let first_sum = first
         * (1.0
@@ -61,6 +74,12 @@ fn action_total(count: u64) -> f64 {
             })
         / 2.0;
     first_sum + middle_sum + count.saturating_sub(100) as f64 * 0.1
+}
+fn reply_total(count: u64) -> f64 {
+    let peak = (106..=110).map(reply_multiplier).sum::<f64>();
+    standard_total(count.min(105))
+        + count.saturating_sub(105).min(5) as f64 * (peak / 5.0)
+        + count.saturating_sub(110) as f64 * 0.5
 }
 pub(crate) fn ranked_threads(
     conn: &Connection,
@@ -193,6 +212,12 @@ mod tests {
                 - 0.1
                 < 1e-9
         );
+        let reply_base = score(0, 0, 0, 105, 0);
+        let reply_after_peak = score(0, 0, 0, 106, 0) - reply_base;
+        let reply_peak = score(0, 0, 0, 110, 0) - score(0, 0, 0, 109, 0);
+        let reply_after_drop = score(0, 0, 0, 111, 0) - score(0, 0, 0, 110, 0);
+        assert!((reply_after_peak - reply_peak).abs() < 1e-9);
+        assert!((reply_after_drop - reply_peak / 15.0).abs() < 1e-9);
         assert!(score(0, 0, i64::MAX, 0, 0) > score(0, 0, 100, 0, 0));
         assert!(score(0, day + 1, 0, 0, 0) < 0.0);
         assert!(score(0, day / 4, 1000, 1000, 1000) > score(0, day + 1, 1000, 1000, 1000));
